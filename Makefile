@@ -17,6 +17,7 @@ $(SUBDIRS):
 # Define a rule to create hard disk image
 boot.img: .FORCE
 	dd if=boot/boot.bin of=$@ bs=512 count=1 conv=notrunc
+	dd if=boot/loader.bin of=$@ bs=512 count=5 seek=1 conv=notrunc
 
 .PHONY: .FORCE
 .FORCE: ;

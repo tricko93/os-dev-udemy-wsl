@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        boot.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/24/2023 09:00 PM
+; @date:        10/24/2023 10:00 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -15,9 +15,15 @@
 ;                   2. Test disk extensions using the TestDiskExtension
 ;                      function.
 ;
-;                   3. The program prints a message on the console.
+;                   3. Loads the loader program from the disk into memory using
+;                      a BIOS interrupt routine.
 ;
-;                   4. The program halts the processor in an infinite loop.
+;                   4. Jumps to the start of the loader program.
+;
+;                   5. The loader program prints a message on the console.
+;
+;                   6. The loader program halts the processor in an infinite
+;                      loop.
 ;
 ; Usage: make
 ;
@@ -28,6 +34,14 @@
 ;
 ; Revision 0.2  10/24/2023  Marko Trickovic
 ; Added TestDiskExtension routine to boot sector code
+;
+; Revision 0.3  10/24/2023  Marko Trickovic
+; Added new feature to read the loader program from the disk.
+;
+; - Implemented error handling to print an error message if there's an error
+;   during the read operation.
+;
+; - If there's no error, the program now jumps to the loaded code.
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
@@ -50,8 +64,25 @@ TestDiskExtension:
     cmp bx,0xaa55       ; Verify if extended disk functions are supported
     jne NotSupport      ; Jump if no disk functions
 
-; Function: PrintMessage
-PrintMessage:
+; Function: LoadLoader
+LoadLoader:
+    mov si,ReadPacket       ; Set SI to the address of ReadPacket
+    mov word[si],0x10       ; Set the size of the ReadPacket structure to 16 B
+    mov word[si+2],5        ; Set the number of sectors to read to 5
+    mov word[si+4],0x7e00   ; Set the memory address where to read data
+    mov word[si+6],0        ; Set the segment offset to 0
+    mov dword[si+8],1       ; Address low
+    mov dword[si+0xc],0     ; Address high
+    mov dl,[DriveId]        ; Set the drive number from which to read
+    mov ah,0x42             ; Read sectors from the disk into memory
+    int 0x13                ; Call BIOS interrupt 0x13
+    jc ReadError            ; Jump if error
+    mov dl,[DriveId]        ; Set the drive number again
+    jmp 0x7e00              ; Jump to the loaded code
+
+; Function: ReadError
+ReadError:
+NotSupport:
     mov ah,0x13         ; Write String function
     mov al,1            ; String with color
     mov bx,0xa          ; Light green on black
@@ -60,14 +91,14 @@ PrintMessage:
     mov cx,MessageLen   ; Length of the string
     int 0x10            ; Call BIOS interrupt 0x10
 
-NotSupport:
 End:
     hlt             ; Halt the processor, waiting for the next interrupt
     jmp End         ; Jump back to 'End', creating an infinite loop
 
-DriveId:    db 0            ; Byte for DriveId
-Message:    db "Hello"      ; Define a byte array 'Message'
+DriveId:    db 0                ; Byte for DriveId
+Message:    db "We have an error in boot process"   ; Define a byte array
 MessageLen: equ $-Message   ; Length of 'Message' by '$' minus start address
+ReadPacket: times 16 db 0   ; Reserve a block of memory used to store read data
 
 ; Master Boot Record (MBR) Partition Table
 ; Partition Entry Structure:
