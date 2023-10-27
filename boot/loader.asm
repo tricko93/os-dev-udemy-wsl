@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        loader.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/26/2023 09:10 PM
+; @date:        10/27/2023 10:10 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -13,16 +13,33 @@
 ;                   1. Checks if the processor supports long mode (64-bit mode)
 ;                      and 1GB Page support.
 ;
-;                   2. LoadKernel subroutine, which sets up the necessary
-;                      parameters for a BIOS disk read operatin in extended
-;                      mode, triggers the operatin via interrupt 0x13, and
-;                      handles potential read errors. The parameters for the
-;                      disk read operation are stored in a data structure
-;                      pointed to by the Source Index (si) register.
+;                   2. LoadKernel subroutine:
 ;
-;                   3. Prints a success message on the console.
+;                       - Sets up the necessary parameters for a BIOS disk read
+;                         operation in extended mode.
 ;
-;                   4. Halts the processor in an infinite loop.
+;                       - Triggers the operation via interrupt 0x13.
+;
+;                       - Handles potential read errors.
+;
+;                       - The parameters for the disk read operation are stored
+;                         in a data structure pointed to by the Source Index
+;                         (si) register.
+;
+;                   3. Memory map retrieval:
+;
+;                       - GetMemInfoStart function gets the initial memory map
+;                         by triggering a BIOS interrupt.
+;
+;                       - GetMemInfo function retrieves subsequent memory map
+;                         entries.
+;
+;                       - GetMemDone function writes a string to the console
+;                         indicating the completion of memory map retrieval.
+;
+;                   4. Prints a success message on the console.
+;
+;                   5. Halts the processor in an infinite loop.
 ;
 ; Usage: make
 ;
@@ -50,6 +67,10 @@
 ;
 ; Revision 03: 10/26/2023  Marko Trickovic
 ; Initial version with LoadKernel function implementation.
+;
+; Revision 0.4: 10/27/2023  Marko Trickovic
+; Added functions for getting system memory map (GetMemInfoStart, GetMemInfo,
+; and GetMemDone).
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
@@ -83,6 +104,30 @@ LoadKernel:
     int 0x13                ; Call BIOS interrupt 0x13
     jc ReadError            ; Jump if error
 
+; Function: GetMemInfoStart
+GetMemInfoStart:
+    mov eax,0xe820          ; Function for Getting System Memory Map
+    mov edx,0x534d4150      ; This is 'SMAP' signature
+    mov ecx,20              ; Size of the memory rang descriptor
+    mov edi,0x9000          ; Buffer to store memory range descriptors
+    xor ebx,ebx             ; Indicate start of enumeration
+    int 0x15                ; Call BIOS interrupt 0x15
+    jc NotSupport           ; Jump if error
+
+    test ebx,ebx            ; All memory range descriptors have been obtained
+    jnz GetMemInfo          ; Get next descriptor
+
+; Function: GetMemInfo
+GetMemInfo:
+    add edi,20              ; Point to next descriptor in buffer
+    mov eax,0xe820          ; Function for Getting System Memory Map
+    mov edx,0x534d4150      ; This is 'SMAP' signature
+    mov ecx,20              ; Size of the memory range descriptor
+    int 0x15                ; Call BIOS interrupt 0x15
+    jc GetMemDone           ; Jump if error
+
+; Function: GetMemDone:
+GetMemDone:
     mov ah,0x13         ; Write String function
     mov al,1            ; String with color
     mov bx,0xa          ; Light green on black
@@ -97,7 +142,7 @@ End:
     hlt             ; Halt the processor, waiting for the next interrupt
     jmp End         ; Jump back to 'End', creating an infinite loop
 
-DriveId:    db 0                    ; Byte for DriveId
-Message:    db "kernel is loaded"   ; Define a byte array 'Message'
+DriveId:    db 0                        ; Byte for DriveId
+Message:    db "Get Memory info done"   ; Define a byte array 'Message'
 MessageLen: equ $-Message   ; Length of 'Message' by '$' minus start address
 ReadPacket: times 16 db 0   ; Allocate 16B, for storing a packet from the disk
