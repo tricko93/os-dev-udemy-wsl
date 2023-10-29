@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        loader.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/29/2023 04:20 PM
+; @date:        10/29/2023 05:20 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -47,9 +47,15 @@
 ;                      enabled. If they are seen as the same, then A20 line is
 ;                      disabled.
 ;
-;                   5. Prints a success message on the console.
+;                    5. Prints a success message on the console using text mode.
+;                       SetVideoMode function sets the video mode to 80x25 text
+;                       mode. PrintMessage function writes each character of a
+;                       message to video memory along with an attribute byte
+;                       that sets the character color.
 ;
-;                   6. Halts the processor in an infinite loop.
+;                    6. Halts the processor in an infinite loop.
+;                       This prevents the processor from executing any further
+;                       instructions until it's reset or interrupted.
 ;
 ; Usage: make
 ;
@@ -82,9 +88,12 @@
 ; Added functions for getting system memory map (GetMemInfoStart, GetMemInfo,
 ; and GetMemDone).
 ;
-; Revision 0.5  10/29/2023  Marko Trickovic
+; Revision 0.5: 10/29/2023  Marko Trickovic
 ; Added functions for testing if the A20 line is enabled (TestA20,
 ; SetA20LineDone).
+;
+; Revision 0.6: 10/29/2023  Marko Trickovic
+; Added SetVideoMode and PrintMessage function implementations.
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
@@ -237,15 +246,35 @@ TestA20:
 
 ; Function: SetA20LineDone
 SetA20LineDone:
-   xor ax,ax                    ; Zero out AX
-   mov es,ax                    ; Set extra segment to 0
-   mov ah,0x13                  ; Function for Writing String
-   mov al,1                     ; String with color
-   mov bx,0xa                   ; Light green on black
-   xor dx,dx                    ; Row 0, column 0
-   mov bp,Message               ; Message address
-   mov cx,MessageLen            ; Length of the string
-   int 0x10                     ; Call BIOS interrupt 0x10
+    xor ax,ax                    ; Zero out AX
+    mov es,ax                    ; Set extra segment to 0
+
+; Function: SetVideoMode
+;
+; This function sets the video mode to 80x25 text mode using the BIOS interrupt
+; 0x10 service 0x00.
+SetVideoMode:
+    mov ax,3                    ; Video mode number in AX (3 = 80x25 text)
+    int 0x10                    ; BIOS interrupt 0x10 to set video mode
+    mov si,Message              ; SI points to message string
+    mov ax,0xb800               ; Segment address of video memory in AX
+    mov es,ax                   ; Move segment address from AX to ES
+    xor di,di                   ; Clear DI to point to video memory start
+    mov cx,MessageLen           ; CX is the length of message string
+
+; Function: PrintMessage
+;
+; This function prints the message string on the display using the video memory
+; at segment 0xB800. It uses a loop to write each byte of the string and its
+; color attribute to the video memory.
+PrintMessage:
+    mov al,[si]             ; Move byte pointed by SI to AL
+    mov [es:di],al          ; Move byte from AL to video memory at ES:DI
+    mov byte[es:di+1],0xa   ; Move color attribute (0xa = light green)
+
+    add di,2                ; Increment DI by 2 to point to next character
+    add si,1                ; Increment SI by 1 to point to next byte in string
+    loop PrintMessage       ; Loop until CX is zero, which means end of string
 
 ReadError:
 NotSupport:
@@ -254,6 +283,6 @@ End:
     jmp End         ; Jump back to 'End', creating an infinite loop
 
 DriveId:    db 0                        ; Byte for DriveId
-Message:    db "a20 line is on"         ; Define a byte array 'Message'
+Message:    db "Text mode is set"       ; Define a byte array 'Message'
 MessageLen: equ $-Message   ; Length of 'Message' by '$' minus start address
 ReadPacket: times 16 db 0   ; Allocate 16B, for storing a packet from the disk
