@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        loader.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/29/2023 07:00 PM
+; @date:        10/29/2023 11:30 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -59,7 +59,23 @@
 ;                        - It prints a message on the display using the video
 ;                          memory at segment 0xb800.
 ;
-;                    6. Halts the processor in an infinite loop.
+;                    6. Code to enable paging and enter long mode from
+;                       protected mode.
+;
+;                        - Prepare the machine for paging by setting up the
+;                          page directory and page table entries.
+;
+;                        - Load the global descriptor table (GDT) by using the
+;                          lgdt instruction.
+;
+;                        - Enable paging by setting the paging bit in the
+;                          control register 0 (cr0).
+;
+;                        - Switch to long mode by setting the long mode bit in
+;                          the extended feature enable register (EFER) and
+;                          jumping to a 64-bit code segment.
+;
+;                    7. Halts the processor in an infinite loop.
 ;                       This prevents the processor from executing any further
 ;                       instructions until it's reset or interrupted.
 ;
@@ -101,8 +117,11 @@
 ; Revision 0.6: 10/29/2023  Marko Trickovic
 ; Added SetVideoMode and PrintMessage function implementations.
 ;
-; Revision 0.7  10/29/2023  Marko Trickovic
+; Revision 0.7: 10/29/2023  Marko Trickovic
 ; Added code to enter protected mode from real mode.
+;
+; Revision 0.8: 10/29/2023  Marko Trickovic
+; Added code to enable paging and enter long mode from protected mode.
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
@@ -283,26 +302,63 @@ PMEntry:                        ; Entry point for protected mode
     mov ss,ax                   ; Move stack segment selector from AX to SS
     mov esp,0x7c00              ; Move stack pointer address (0x7c00) to ESP
 
-    mov byte[0xb8000],'P'       ; Move ASCII code of 'P' to video memory
-    mov byte[0xb8001],0xa       ; Move color attribute to next byte
+    cld                         ; Increment edi after store
+    mov edi,0x70000             ; Page directory base
+    xor eax,eax                 ; Clear page directory
+    mov ecx,0x10000/4           ; Page directory size
+    rep stosd                   ; Store eax to edi
+
+    mov dword[0x70000],0x71007      ; First page directory entry
+    mov dword[0x71000],10000111b    ; First page table entry
+
+    lgdt [Gdt64Ptr]             ; Load GDT pointer
+
+    mov eax,cr4                 ; Get cr4
+    or eax,(1<<5)               ; Enable PAE
+    mov cr4,eax                 ; Set cr4
+
+    mov eax,0x70000             ; Get page directory base
+    mov cr3,eax                 ; Set PDBR
+
+    mov ecx,0xc0000080          ; Get EFER MSR address
+    rdmsr                       ; Read EFER MSR
+    or eax,(1<<8)               ; Enable long mode
+    wrmsr                       ; Write EFER MSR
+
+    mov eax,cr0                 ; Get cr0
+    or eax,(1<<31)              ; Enable paging
+    mov cr0,eax                 ; Set cr0
+
+    jmp 8:LMEntry               ; Switch to long mode
 
 PEnd:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp PEnd                    ; Jump to 'PEnd' label in infinite loop
 
+[BITS 64]                       ; Set processor mode to 64-bit
+LMEntry:                        ; Entry point for long mode
+    mov rsp,0x7c00              ; Stack pointer
+
+    mov byte[0xb8000],'L'       ; Write 'L' to video memory
+    mov byte[0xb8001],0xa       ; Green color
+
+LEnd:
+    hlt                         ; Halt CPU until external interrupt jmp
+    jmp LEnd                    ; Jump to 'LEnd' label in infinite loop
+
 DriveId:    db 0            ; Byte for DriveId
 ReadPacket: times 16 db 0   ; Allocate 16B, for storing a packet from the disk
 
-Gdt32:                      ; 64-bit GDT descriptor, zero-initialized
+Gdt32:                      ; 32-bit GDT descriptor, zero-initialized
     dq 0
-Code32:                     ; 64-bit code segment descriptor
+Code32:                     ; 32-bit code segment descriptor
     dw 0xffff               ; limit=64K
     dw 0                    ; base=0
     db 0                    ; base=0
     db 0x9a                 ; access=0x9a
     db 0xcf                 ; flags=0xcf
     db 0                    ; upper 8 bits of base address
-Data32:                     ; 64-bit data segment descriptor
+Data32:                     ; 32-bit data segment descriptor
     dw 0xffff               ; limit=64K
     dw 0                    ; base=0
     db 0                    ; base=0
@@ -310,10 +366,19 @@ Data32:                     ; 64-bit data segment descriptor
     db 0xcf                 ; flags=0xcf
     db 0                    ; upper 8 bits of base address
 
-Gdt32Len: equ $-Gdt32       ; Length of GDT
+Gdt32Len: equ $-Gdt32       ; Length of Gdt32
 
-Gdt32Ptr: dw Gdt32Len-1     ; Length of GDT - 1
-          dd Gdt32          ; Address of GDT
+Gdt32Ptr: dw Gdt32Len-1     ; (Length of Gdt32) - 1
+          dd Gdt32          ; Address of Gdt32
 
-Idt32Ptr: dw 0              ; Length of IDT
-          dd 0              ; Address of IDT
+Idt32Ptr: dw 0              ; Length of Idt32
+          dd 0              ; Address of Idt32
+
+Gdt64:                      ; 64-bit GDT descriptor, zero-initialized
+    dq 0
+    dq 0x0020980000000000   ; Code segment descriptor
+
+Gdt64Len: equ $-Gdt64       ; Length of Gdt64
+
+Gdt64Ptr: dw Gdt64Len-1     ; (Length of Gdt64)-1
+          dd Gdt64          ; Address of Gdt64
