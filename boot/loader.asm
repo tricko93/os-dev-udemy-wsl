@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        loader.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/29/2023 05:20 PM
+; @date:        10/29/2023 07:00 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -47,11 +47,17 @@
 ;                      enabled. If they are seen as the same, then A20 line is
 ;                      disabled.
 ;
-;                    5. Prints a success message on the console using text mode.
-;                       SetVideoMode function sets the video mode to 80x25 text
-;                       mode. PrintMessage function writes each character of a
-;                       message to video memory along with an attribute byte
-;                       that sets the character color.
+;                    5. Code to enter protected mode from real mode.
+;
+;                        - It defines the Global Descriptor Table (GDT) and the
+;                          Interrupt Descriptor Table (IDT) for protected mode.
+;
+;                        - It switches to protected mode by setting the PE bit
+;                          in CR0 register and performs a far jump to a 32-bit
+;                          code segment.
+;
+;                        - It prints a message on the display using the video
+;                          memory at segment 0xb800.
 ;
 ;                    6. Halts the processor in an infinite loop.
 ;                       This prevents the processor from executing any further
@@ -94,6 +100,9 @@
 ;
 ; Revision 0.6: 10/29/2023  Marko Trickovic
 ; Added SetVideoMode and PrintMessage function implementations.
+;
+; Revision 0.7  10/29/2023  Marko Trickovic
+; Added code to enter protected mode from real mode.
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
@@ -208,13 +217,6 @@ GetMemInfo:
 
 ; Function: GetMemDone:
 GetMemDone:
-    mov ah,0x13         ; Write String function
-    mov al,1            ; String with color
-    mov bx,0xa          ; Light green on black
-    xor dx,dx           ; Row 0, column 0
-    mov bp,Message      ; Message address
-    mov cx,MessageLen   ; Length of the string
-    int 0x10            ; Call BIOS interrupt 0x10
 
 ; Function: TestA20
 ;
@@ -256,33 +258,62 @@ SetA20LineDone:
 SetVideoMode:
     mov ax,3                    ; Video mode number in AX (3 = 80x25 text)
     int 0x10                    ; BIOS interrupt 0x10 to set video mode
-    mov si,Message              ; SI points to message string
-    mov ax,0xb800               ; Segment address of video memory in AX
-    mov es,ax                   ; Move segment address from AX to ES
-    xor di,di                   ; Clear DI to point to video memory start
-    mov cx,MessageLen           ; CX is the length of message string
 
-; Function: PrintMessage
-;
-; This function prints the message string on the display using the video memory
-; at segment 0xB800. It uses a loop to write each byte of the string and its
-; color attribute to the video memory.
-PrintMessage:
-    mov al,[si]             ; Move byte pointed by SI to AL
-    mov [es:di],al          ; Move byte from AL to video memory at ES:DI
-    mov byte[es:di+1],0xa   ; Move color attribute (0xa = light green)
+    cli                         ; Disable hardware interrupts
+    lgdt [Gdt32Ptr]             ; Load GDTR from Gdt32Ptr
+    lidt [Idt32Ptr]             ; Load IDTR from Idt32Ptr
 
-    add di,2                ; Increment DI by 2 to point to next character
-    add si,1                ; Increment SI by 1 to point to next byte in string
-    loop PrintMessage       ; Loop until CX is zero, which means end of string
+    mov eax,cr0                 ; Move CR0 to EAX
+    or eax,1                    ; Enable protected mode in EAX
+    mov cr0,eax                 ; Move EAX back to CR0
+
+    jmp 8:PMEntry               ; Far jump to code segment 8 and offset PMEntry
 
 ReadError:
 NotSupport:
 End:
-    hlt             ; Halt the processor, waiting for the next interrupt
-    jmp End         ; Jump back to 'End', creating an infinite loop
+    hlt                         ; Halt the CPU, waiting for the next interrupt
+    jmp End                     ; Jump back to 'End', creating an infinite loop
 
-DriveId:    db 0                        ; Byte for DriveId
-Message:    db "Text mode is set"       ; Define a byte array 'Message'
-MessageLen: equ $-Message   ; Length of 'Message' by '$' minus start address
+[BITS 32]                       ; Set processor mode to 32-bit
+PMEntry:                        ; Entry point for protected mode
+    mov ax,0x10                 ; Move data segment selector (0x10) to AX
+    mov ds,ax                   ; Move data segment selector from AX to DS
+    mov es,ax                   ; Move data segment selector from AX to ES
+    mov ss,ax                   ; Move stack segment selector from AX to SS
+    mov esp,0x7c00              ; Move stack pointer address (0x7c00) to ESP
+
+    mov byte[0xb8000],'P'       ; Move ASCII code of 'P' to video memory
+    mov byte[0xb8001],0xa       ; Move color attribute to next byte
+
+PEnd:
+    hlt                         ; Halt CPU until external interrupt jmp
+    jmp PEnd                    ; Jump to 'PEnd' label in infinite loop
+
+DriveId:    db 0            ; Byte for DriveId
 ReadPacket: times 16 db 0   ; Allocate 16B, for storing a packet from the disk
+
+Gdt32:                      ; 64-bit GDT descriptor, zero-initialized
+    dq 0
+Code32:                     ; 64-bit code segment descriptor
+    dw 0xffff               ; limit=64K
+    dw 0                    ; base=0
+    db 0                    ; base=0
+    db 0x9a                 ; access=0x9a
+    db 0xcf                 ; flags=0xcf
+    db 0                    ; upper 8 bits of base address
+Data32:                     ; 64-bit data segment descriptor
+    dw 0xffff               ; limit=64K
+    dw 0                    ; base=0
+    db 0                    ; base=0
+    db 0x92                 ; access=0x92
+    db 0xcf                 ; flags=0xcf
+    db 0                    ; upper 8 bits of base address
+
+Gdt32Len: equ $-Gdt32       ; Length of GDT
+
+Gdt32Ptr: dw Gdt32Len-1     ; Length of GDT - 1
+          dd Gdt32          ; Address of GDT
+
+Idt32Ptr: dw 0              ; Length of IDT
+          dd 0              ; Address of IDT
