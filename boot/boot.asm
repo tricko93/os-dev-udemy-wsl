@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        boot.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/24/2023 10:00 PM
+; @date:        10/29/2023 04:20 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -55,6 +55,13 @@ start:
     mov sp,0x7c00   ; Set stack pointer to boot sector address
 
 ; Function: TestDiskExtension
+;
+; This function tests if the disk drive identified by DL supports extended disk
+; functions. It uses the BIOS interrupt 0x13 service 0x41 to test disk
+; extensions, and expects the BIOS to set BX to 0xAA55 if supported, or return
+; an error otherwise. It stores the drive ID in memory for later use, and jumps
+; to NotSupport label if extended disk functions are not supported or an error
+; occurs.
 TestDiskExtension:
     mov [DriveId],dl    ; Store the drive ID in memory
     mov ah,0x41         ; BIOS code to test disk extensions
@@ -65,6 +72,16 @@ TestDiskExtension:
     jne NotSupport      ; Jump if no disk functions
 
 ; Function: LoadLoader
+;
+; This function loads the loader program from the hard disk drive identified
+; by DriveId into memory at address 0x7E00 and jumps to it.
+; It uses the BIOS interrupt 0x13 service 0x42 to read sectors from the disk
+; into memory using LBA addressing. It sets up a ReadPacket structure in memory
+; that contains the parameters for the disk read operation, such as the number
+; of sectors, the memory address, and the LBA address.
+; It checks for any errors after the disk read operation and jumps to a
+; ReadError label if any. It restores the drive number in DL register and jumps
+; to the loaded code at address 0x7E00.
 LoadLoader:
     mov si,ReadPacket       ; Set SI to the address of ReadPacket
     mov word[si],0x10       ; Set the size of the ReadPacket structure to 16 B
@@ -81,6 +98,13 @@ LoadLoader:
     jmp 0x7e00              ; Jump to the loaded code
 
 ; Function: ReadError
+;
+; This function prints a string on the display using the BIOS interrupt 0x10
+; service 0x13. It sets up the parameters for the service in the registers,
+; such as the write mode, the color attribute, the cursor position, the string
+; address, and the string length. It then invokes the BIOS interrupt 0x10 with
+; AH=0x13, which writes the string to the display at the specified location and
+; color.
 ReadError:
 NotSupport:
     mov ah,0x13         ; Write String function
