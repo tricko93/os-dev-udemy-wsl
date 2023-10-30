@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        loader.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/29/2023 11:30 PM
+; @date:        10/29/2023 09:40 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -75,9 +75,14 @@
 ;                          the extended feature enable register (EFER) and
 ;                          jumping to a 64-bit code segment.
 ;
-;                    7. Halts the processor in an infinite loop.
-;                       This prevents the processor from executing any further
-;                       instructions until it's reset or interrupted.
+;                    7. Code to relocate the Kernel from 0x10000 to 0x200000
+;                       memory address.
+;
+;                        - Relocates the Kernel from 0x10000 to 0x200000.
+;
+;                        - Jumps to the kernel entry point at 0x200000.
+;
+;                        - Halts the processor in an infinite loop.
 ;
 ; Usage: make
 ;
@@ -122,10 +127,13 @@
 ;
 ; Revision 0.8: 10/29/2023  Marko Trickovic
 ; Added code to enable paging and enter long mode from protected mode.
+;
+; Revision 0.9  10/30/2023  Marko Trickovic
+; Code to relocate the Kernel from 0x10000 to 0x200000 memory address.
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
-[ORG 0x7e00]        ; Set origin to boot sector address
+[ORG 0x7e00]        ; Set origin to loader program address
 
 ; This code is used to check if the CPU supports long mode and 1G page support.
 ; Long mode is a feature of the x86-64 architecture that allows 64-bit code to
@@ -294,7 +302,7 @@ End:
     hlt                         ; Halt the CPU, waiting for the next interrupt
     jmp End                     ; Jump back to 'End', creating an infinite loop
 
-[BITS 32]                       ; Set processor mode to 32-bit
+[BITS 32]                       ; Use 32-bit mode
 PMEntry:                        ; Entry point for protected mode
     mov ax,0x10                 ; Move data segment selector (0x10) to AX
     mov ds,ax                   ; Move data segment selector from AX to DS
@@ -335,12 +343,17 @@ PEnd:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp PEnd                    ; Jump to 'PEnd' label in infinite loop
 
-[BITS 64]                       ; Set processor mode to 64-bit
+[BITS 64]                       ; Use 64-bit mode
 LMEntry:                        ; Entry point for long mode
     mov rsp,0x7c00              ; Stack pointer
 
-    mov byte[0xb8000],'L'       ; Write 'L' to video memory
-    mov byte[0xb8001],0xa       ; Green color
+    cld                         ; Increment rdi after store
+    mov rdi,0x200000            ; New destination for Kernel
+    mov rsi,0x10000             ; Old destination for Kernel
+    mov rcx,51200/8             ; 512B * 100 sectors / 8
+    rep movsq                   ; Quadwords move (reloacte kernel)
+
+    jmp 0x200000                ; Jump to kernel
 
 LEnd:
     hlt                         ; Halt CPU until external interrupt jmp

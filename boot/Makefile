@@ -5,7 +5,7 @@ include ../global.mak
 
 # Define the default target
 .PHONY: all
-all: boot.bin loader.bin
+all: boot.bin loader.bin kernel.bin
 
 # Define a rule for assembling assembly programs into binary executables
 %.bin:		%.asm
