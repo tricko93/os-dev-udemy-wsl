@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/30/2023 11:57 PM
+; @date:        10/31/2023 07:17 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -45,10 +45,49 @@
 ;
 ; Revision 0.3: 10/30/2023 Marko Trickovic
 ; Set up and load IDT. Implement and test divide by 0 exception handling.
-;------------------------------------------------------------------------------
+;
+; Revision 0.4  10/31/2023  Marko Trickovic
+; Define and use push/pop macros in interrupt handlers.
+; -----------------------------------------------------------------------------
 
 [BITS 64]                       ; Use 64-bit mode
 [ORG 0x200000]                  ; Set origin to Kernel address
+
+%macro push_regs 0              ; Define macro for saving the registers
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+%endmacro
+
+%macro pop_regs 0               ; Define macro for restoring the registers
+    pop	r15
+    pop	r14
+    pop	r13
+    pop	r12
+    pop	r11
+    pop	r10
+    pop	r9
+    pop	r8
+    pop	rbp
+    pop	rdi
+    pop	rsi
+    pop	rdx
+    pop	rcx
+    pop	rbx
+    pop	rax
+%endmacro
 
 start:
     mov rdi,Idt                 ; Set the first IDT entry to point to Handler0
@@ -80,10 +119,13 @@ End:
     jmp End                     ; Jump to 'End' label in infinite loop
 
 Handler0:
+    push_regs                   ; Save the registers
     mov byte[0xb8000],'D'       ; Write 'D' to video memory
     mov byte[0xb8001],0xc       ; Red color
 
     jmp End                     ; Jump to 'End' label in infinite loop
+
+    pop_regs                    ; Restore the registers
 
     iretq
 
