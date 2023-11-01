@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/31/2023 09:45 PM
+; @date:        11/01/2023 11:40 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -52,6 +52,13 @@
 ;                   - The expected output is 'KT' in green and yellow colors on
 ;                     the screen, every 10 milliseconds.
 ;
+;                   - Switches to ring 3 by pushing the values for CS, RFLAGS,
+;                     offset, interrupt number, DS, and UserEntry address on
+;                     the stack and returning from interrupt.
+;
+;                   - Jumps to the user entry point in ring 3 and writes 'U' in
+;                     white color to the video memory.
+;
 ; Usage: make
 ;
 ; Revision History:
@@ -65,12 +72,15 @@
 ; Revision 0.3: 10/30/2023 Marko Trickovic
 ; Set up and load IDT. Implement and test divide by 0 exception handling.
 ;
-; Revision 0.4  10/31/2023  Marko Trickovic
+; Revision 0.4: 10/31/2023 Marko Trickovic
 ; Define and use push/pop macros in interrupt handlers.
 ;
-; Revision 0.5  10/31/2023  Marko Trickovic
+; Revision 0.5: 10/31/2023 Marko Trickovic
 ; Set up and test timer interrupt handler in 64-bit kernel.
-;------------------------------------------------------------------------------
+;
+; Revision 0.6: 11/01/2023  Marko Trickovic
+; Added the code for switching to ring 3 and jumping to the UserEntry point.
+; -----------------------------------------------------------------------------
 
 [BITS 64]                       ; Use 64-bit mode
 [ORG 0x200000]                  ; Set origin to Kernel address
@@ -174,11 +184,28 @@ InitPIC:                        ; Set PIC mode and mapping
     mov al,11111111b            ; Disable all IRQs for slave PIC
     out 0xa1,al                 ; IMR to slave PIC port
 
-    sti                         ; Enable interrupts
+    push 0x18|3                 ; long mode CS and RFLAGS
+    push 0x7c00                 ; user entry offset
+    push 0x2                    ; interrupt number for iretq
+    push 0x10|3                 ; protected mode DS and reserved
+    push UserEntry              ; UserEntry address
+    iretq                       ; return and jump to UserEntry in long mode
 
 End:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp End                     ; Jump to 'End' label in infinite loop
+
+UserEntry:
+    mov ax,cs                   ; move the code segment selector to ax
+    and al,11b                  ; mask the lower byte of ax with 11b
+    cmp al,3                    ; compare the lower byte of ax with 3
+    jne UEnd                    ; jump to UEnd if not equal
+
+    mov byte[0xb8010],'U'       ; move 'U' to the video memory address
+    mov byte[0xb8011],0xE       ; move 0xE (white on black) to the video memory
+
+UEnd:
+    jmp UEnd                    ; loop indefinitely
 
 Handler0:
     push_regs                   ; Save the registers
@@ -202,8 +229,10 @@ Timer:
     iretq
 
 Gdt64:                          ; 64-bit GDT descriptor, zero-initialized
-    dq 0
-    dq 0x0020980000000000       ; Code segment descriptor
+    dq 0                        ; Null entry, required
+    dq 0x0020980000000000       ; Long mode code segment, ring 0
+    dq 0x0020f80000000000       ; Long mode data segment, ring 0
+    dq 0x0000f20000000000       ; Long mode TSS segment, ring 0
 
 Gdt64Len: equ $-Gdt64           ; Length of Gdt64
 
