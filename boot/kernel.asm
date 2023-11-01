@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/31/2023 07:17 PM
+; @date:        10/31/2023 09:45 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -27,11 +27,30 @@
 ;               halting the CPU until an external interrupt occurs, and then
 ;               jumping back to the halt instruction.
 ;
-;               Note: The intentional divide-by-zero exception is triggered
-;               in this code to test interrupt handling. The 'End' label
-;               contains a divide by zero operation (div rbx), leading to a
-;               divide-by-zero exception. The exception is handled by the IDT,
-;               and the kernel responds appropriately by printing character 'D'.
+;               The code does the following:
+;
+;                   - Sets up the Global Descriptor Table (GDT) and the
+;                     Interrupt Descriptor Table (IDT) for handling interrupts
+;                     and exceptions.
+;
+;                   - Switches to 64-bit mode and writes 'K' in green color to
+;                     the video memory.
+;
+;                   - Initializes the Programmable Interval Timer (PIT) and the
+;                     Programmable Interrupt Controller (PIC) to generate
+;                     periodic timer interrupts.
+;
+;                   - Defines two handler functions: one for the divide by 0
+;                     exception and one for the timer interrupt.
+;
+;                   - The divide by 0 handler writes 'D' in red color to the
+;                     video memory and halts the CPU.
+;
+;                   - The timer handler writes 'T' in yellow color to the video
+;                     memory and returns from the interrupt.
+;
+;                   - The expected output is 'KT' in green and yellow colors on
+;                     the screen, every 10 milliseconds.
 ;
 ; Usage: make
 ;
@@ -48,7 +67,10 @@
 ;
 ; Revision 0.4  10/31/2023  Marko Trickovic
 ; Define and use push/pop macros in interrupt handlers.
-; -----------------------------------------------------------------------------
+;
+; Revision 0.5  10/31/2023  Marko Trickovic
+; Set up and test timer interrupt handler in 64-bit kernel.
+;------------------------------------------------------------------------------
 
 [BITS 64]                       ; Use 64-bit mode
 [ORG 0x200000]                  ; Set origin to Kernel address
@@ -90,14 +112,22 @@
 %endmacro
 
 start:
-    mov rdi,Idt                 ; Set the first IDT entry to point to Handler0
-    mov rax,Handler0            ; Load IDT base address into rdi
+    mov rdi,Idt                 ; Load IDT base address into rdi
 
+    mov rax,Handler0            ; Set the first IDT entry to point to Handler0
     mov [rdi],ax                ; Store low 16 bits of Handler0
     shr rax,16                  ; Shift rax right by 16 bits
     mov [rdi+6],ax              ; Store mid 16 bits of Handler0
     shr rax,16                  ; Shift rax right by 16 bits
     mov [rdi+8],eax             ; Store high 32 bits of Handler0
+
+    mov rax,Timer               ; Set the second IDT entry to point to Timer
+    add rdi,32*16
+    mov [rdi],ax                ; Store low 16 bits of Timer
+    shr rax,16                  ; Shift rax right by 16 bits
+    mov [rdi+6],ax              ; Store mid 16 bits of Timer
+    shr rax,16                  ; Shift rax right by 16 bits
+    mov [rdi+8],eax             ; Store high 32 bits of Timer
 
     lgdt [Gdt64Ptr]             ; Load GDT pointer
     lidt [IdtPtr]               ; Load IDT pointer
@@ -111,8 +141,40 @@ KernelEntry:
     mov byte[0xb8000],'K'       ; Write 'K' to video memory
     mov byte[0xb8001],0xa       ; Green color
 
-    xor rbx,rbx                 ; Zero RBX
-    div rbx                     ; Divide by 0 to generate interrupt
+InitPIT:                        ; Set PIT mode and frequency
+    mov al,(1<<2)|(3<<4)        ; Rate generator, low/high
+    out 0x43,al                 ; Command byte to PIT port
+
+    mov ax,11931                ; Reload value for 100 Hz
+    out 0x40,al                 ; Low byte to PIT channel 0 port
+    mov al,ah                   ; High byte to al
+    out 0x40,al                 ; High byte to PIT channel 0 port
+
+InitPIC:                        ; Set PIC mode and mapping
+    mov al,0x11                 ; Start init, use ICW4, edge triggered
+    out 0x20,al                 ; ICW1 to master PIC port
+    out 0xa0,al                 ; ICW1 to slave PIC port
+
+    mov al,32                   ; Map IRQ0-7 to INT 20h-27h for master PIC
+    out 0x21,al                 ; ICW2 to master PIC port
+    mov al,40                   ; Map IRQ8-15 to INT 28h-2Fh for slave PIC
+    out 0xa1,al                 ; ICW2 to slave PIC port
+
+    mov al,4                    ; Connect IRQ2 of master PIC to slave PIC
+    out 0x21,al                 ; ICW3 to master PIC port
+    mov al,2                    ; Connect slave PIC to IRQ2 of master PIC
+    out 0xa1,al                 ; ICW3 to slave PIC port
+
+    mov al,1                    ; Use 8086 mode for both PICs
+    out 0x21,al                 ; ICW4 to master PIC port
+    out 0xa1,al                 ; ICW4 to slave PIC port
+
+    mov al,11111110b            ; Only IRQ0 (timer) on for master PIC
+    out 0x21,al                 ; IMR to master PIC port
+    mov al,11111111b            ; Disable all IRQs for slave PIC
+    out 0xa1,al                 ; IMR to slave PIC port
+
+    sti                         ; Enable interrupts
 
 End:
     hlt                         ; Halt CPU until external interrupt jmp
@@ -123,6 +185,16 @@ Handler0:
     mov byte[0xb8000],'D'       ; Write 'D' to video memory
     mov byte[0xb8001],0xc       ; Red color
 
+    jmp End                     ; Jump to 'End' label in infinite loop
+
+    pop_regs                    ; Restore the registers
+
+    iretq
+
+Timer:
+    push_regs                   ; Save the registers
+    mov byte[0xb8020],'T'       ; Write 'T' to video memory
+    mov byte[0xb8021],0xe
     jmp End                     ; Jump to 'End' label in infinite loop
 
     pop_regs                    ; Restore the registers
