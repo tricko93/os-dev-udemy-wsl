@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        11/01/2023 11:40 PM
+; @date:        11/02/2023 10:50 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -59,6 +59,11 @@
 ;                   - Jumps to the user entry point in ring 3 and writes 'U' in
 ;                     white color to the video memory.
 ;
+;                   - Added a TSS descriptor definition for the current task.
+;
+;                   - Added a code snippet to set the TSS descriptor in the GDT
+;                     and load the TR with the TSS selector.
+;
 ; Usage: make
 ;
 ; Revision History:
@@ -78,9 +83,12 @@
 ; Revision 0.5: 10/31/2023 Marko Trickovic
 ; Set up and test timer interrupt handler in 64-bit kernel.
 ;
-; Revision 0.6: 11/01/2023  Marko Trickovic
+; Revision 0.6: 11/01/2023 Marko Trickovic
 ; Added the code for switching to ring 3 and jumping to the UserEntry point.
-; -----------------------------------------------------------------------------
+;
+; Revision 0.7: 11/02/2023 Marko Trickovic
+; Revised the code to add TSS support.
+;------------------------------------------------------------------------------
 
 [BITS 64]                       ; Use 64-bit mode
 [ORG 0x200000]                  ; Set origin to Kernel address
@@ -142,6 +150,19 @@ start:
     lgdt [Gdt64Ptr]             ; Load GDT pointer
     lidt [IdtPtr]               ; Load IDT pointer
 
+SetTss:
+    mov rax,Tss                 ; Base address of TSS to RAX
+    mov [TssDesc+2],ax          ; Low 16 bits of RAX to bytes 2 and 3
+    shr rax,16                  ; Shift RAX right by 16 bits
+    mov [TssDesc+4],al          ; Low 8 bits of RAX to byte 4
+    shr rax,8                   ; Shift RAX right by 8 bits
+    mov [TssDesc+7],al          ; Low 8 bits of RAX to byte 7
+    shr rax,8                   ; Shift RAX right by 8 bits
+    mov [TssDesc+8],eax         ; Low 32 bits of RAX to bytes 8 to 11
+
+    mov ax,0x20                 ; Segment selector for TSS descriptor to AX
+    ltr ax                      ; Load TR with AX
+
     push 8                      ; Push the code segment selector
     push KernelEntry            ; Push the kernel entry point address
     db 0x48                     ; Use the REX prefix to indicate 64-bit operand
@@ -186,7 +207,7 @@ InitPIC:                        ; Set PIC mode and mapping
 
     push 0x18|3                 ; long mode CS and RFLAGS
     push 0x7c00                 ; user entry offset
-    push 0x2                    ; interrupt number for iretq
+    push 0x202                  ; interrupt number for iretq
     push 0x10|3                 ; protected mode DS and reserved
     push UserEntry              ; UserEntry address
     iretq                       ; return and jump to UserEntry in long mode
@@ -228,11 +249,41 @@ Timer:
 
     iretq
 
+
+; This code defines a 64-bit GDT descriptor, which is a table that contains
+; information about the segments and tasks in the system.
+; The GDT descriptor has four entries:
+; - Null entry: this entry is required and must be zero.
+; - Code segment: this entry defines the code segment for long mode, which is
+;   the 64-bit operating mode of the processor.
+; - Data segment: this entry defines the data segment for long mode, which is
+;   where the program data is stored.
+; - TSS segment: this entry defines the task state segment (TSS) for long mode,
+;   which is a structure that holds information about a task, such as processor
+;   register state, I/O port permissions, inner-level stack pointers, and
+;   previous TSS link.
+; The TSS segment entry has the following fields:
+; - Limit: the 16-bit size of the TSS.
+; - Base: the 64-bit linear base address of the TSS.
+; - Type: the type of the TSS, either 9 for non-busy or 11 for busy.
+; - DPL: the descriptor privilege level, which determines who can access the
+; TSS descriptor.
+; - P: the present bit, which indicates whether the TSS is in memory or not.
+; - G: the granularity bit, which determines how the limit is interpreted.
 Gdt64:                          ; 64-bit GDT descriptor, zero-initialized
     dq 0                        ; Null entry, required
     dq 0x0020980000000000       ; Long mode code segment, ring 0
     dq 0x0020f80000000000       ; Long mode data segment, ring 0
     dq 0x0000f20000000000       ; Long mode TSS segment, ring 0
+TssDesc:
+    dw TssLen-1                 ; Limit of TSS
+    dw 0                        ; Base of TSS (low)
+    db 0                        ; Base of TSS (middle)
+    db 0x89                     ; Type (9), DPL (0), P (1)
+    db 0                        ; Limit (high), G (0)
+    db 0                        ; Base of TSS (high)
+    dq 0                        ; Base of TSS (upper)
+
 
 Gdt64Len: equ $-Gdt64           ; Length of Gdt64
 
@@ -256,3 +307,21 @@ IdtLen: equ $-Idt               ; Length of IDT
 
 IdtPtr: dw IdtLen-1             ; Length of IDT-1
         dq Idt                  ; Address of Idt
+
+
+; TSS descriptor for current task
+; TSS holds info about a task, e.g. registers, I/O, stacks, link
+; - Base: 32-bit linear address of TSS
+; - Limit: 20-bit size of TSS
+; - Type: 9 for non-busy or 11 for busy
+; - DPL: privilege level of descriptor
+; - P: present bit, 1 if TSS in memory
+; - G: granularity bit, how limit is interpreted
+; More info:
+Tss:
+    dd 0                        ; First 32 bits reserved, zero
+    dq 0x150000                 ; Next 64 bits are base address
+    times 88 db 0               ; Next 88 bytes reserved, zero
+    dd TssLen                   ; Last 32 bits are limit
+
+TssLen: equ $-Tss               ; Label for size of TSS
