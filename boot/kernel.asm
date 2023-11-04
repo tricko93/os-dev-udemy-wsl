@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        11/04/2023 08:30 PM
+; @date:        11/04/2023 11:55 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -51,14 +51,8 @@
 ;                     which is yellow-on-black.
 ;
 ;                   - The expected output is a changing character in white and
-;                     yellow colors on the top left corner of the screen, every
-;                     10 milliseconds.
-;
-;                   - The timer handler writes 'T' in yellow color to the video
-;                     memory and returns from the interrupt.
-;
-;                   - The expected output is 'KT' in green and yellow colors on
-;                     the screen, every 10 milliseconds.
+;                     yellow colors on the top right corner of the screen,
+;                     every 10 milliseconds.
 ;
 ;                   - Jumps to the user entry point in ring 3 and increments
 ;                     the ASCII code of the second char in white color to the
@@ -67,9 +61,6 @@
 ;                   - Switches to ring 3 by pushing the values for CS, RFLAGS,
 ;                     offset, interrupt number, DS, and UserEntry address on
 ;                     the stack and returning from interrupt.
-;
-;                   - Jumps to the user entry point in ring 3 and writes 'U' in
-;                     white color to the video memory.
 ;
 ;                   - Added a TSS descriptor definition for the current task.
 ;
@@ -101,10 +92,16 @@
 ; Revision 0.7: 11/02/2023 Marko Trickovic
 ; Revised the code to add TSS support.
 ;
-; Revision 0.8  11/04/2023  Marko Trickovic
+; Revision 0.8: 11/04/2023 Marko Trickovic
 ; Modified UserEntry function and timer interrupt handler to increment the
 ; ASCII code of the second and third characters on the screen, respectively.
-; -----------------------------------------------------------------------------
+;
+; Revision 0.9: 11/04/2023 Marko Trickovic
+; Implemented the SetHandler function that sets up an interrupt handler in
+; the IDT.
+; Implemented the spurious interrupt handler that checks if a spurious
+; interrupt has occurred and acknowledges it.
+;------------------------------------------------------------------------------
 
 [BITS 64]                       ; Use 64-bit mode
 [ORG 0x200000]                  ; Set origin to Kernel address
@@ -145,27 +142,40 @@
     pop	rax
 %endmacro
 
+; start Label
+; Purpose: Sets up the interrupt handling mechanism and switches to 64-bit mode
+; Parameters: None
+; Return Value: None
+; Registers Used: rdi, rax
+; Flags Modified: None
+; Assumptions: None
+; Side Effects: None
 start:
     mov rdi,Idt                 ; Load IDT base address into rdi
 
     mov rax,Handler0            ; Set the first IDT entry to point to Handler0
-    mov [rdi],ax                ; Store low 16 bits of Handler0
-    shr rax,16                  ; Shift rax right by 16 bits
-    mov [rdi+6],ax              ; Store mid 16 bits of Handler0
-    shr rax,16                  ; Shift rax right by 16 bits
-    mov [rdi+8],eax             ; Store high 32 bits of Handler0
+    call SetHandler
 
     mov rax,Timer               ; Set the second IDT entry to point to Timer
-    add rdi,32*16
-    mov [rdi],ax                ; Store low 16 bits of Timer
-    shr rax,16                  ; Shift rax right by 16 bits
-    mov [rdi+6],ax              ; Store mid 16 bits of Timer
-    shr rax,16                  ; Shift rax right by 16 bits
-    mov [rdi+8],eax             ; Store high 32 bits of Timer
+    mov rdi,Idt+32*16
+    call SetHandler
+
+    mov rdi,Idt+32*16+7*16      ; Move to the seventh IDT entry
+    mov rax,SIRQ                ; Set the third IDT entry to point to SIRQ
+    call SetHandler
 
     lgdt [Gdt64Ptr]             ; Load GDT pointer
     lidt [IdtPtr]               ; Load IDT pointer
 
+; SetTss Routine
+; Purpose: Sets up the Task State Segment (TSS) descriptor in the GDT and
+; loads the TR with the TSS selector
+; Parameters: None
+; Return Value: None
+; Registers Used: rax, ax
+; Flags Modified: None
+; Assumptions: None
+; Side Effects: Switches to 64-bit mode and jumps to the kernel entry point
 SetTss:
     mov rax,Tss                 ; Base address of TSS to RAX
     mov [TssDesc+2],ax          ; Low 16 bits of RAX to bytes 2 and 3
@@ -188,6 +198,14 @@ KernelEntry:
     mov byte[0xb8000],'K'       ; Write 'K' to video memory
     mov byte[0xb8001],0xa       ; Green color
 
+; Routine: InitPIT
+; Purpose: Sets up the Programmable Interval Timer (PIT) mode and frequency
+; Parameters: None
+; Return Value: None
+; Registers Used: al, ax
+; Flags Modified: None
+; Assumptions: None
+; Side Effects: Generates periodic timer interrupts at 100 Hz
 InitPIT:                        ; Set PIT mode and frequency
     mov al,(1<<2)|(3<<4)        ; Rate generator, low/high
     out 0x43,al                 ; Command byte to PIT port
@@ -197,6 +215,14 @@ InitPIT:                        ; Set PIT mode and frequency
     mov al,ah                   ; High byte to al
     out 0x40,al                 ; High byte to PIT channel 0 port
 
+; Routine: InitPIC
+; Purpose: Sets up the Programmable Interrupt Controller (PIC) mode and mapping
+; Parameters: None
+; Return Value: None
+; Registers Used: al
+; Flags Modified: None
+; Assumptions: None
+; Side Effects: Enables the timer interrupt and switches to user mode
 InitPIC:                        ; Set PIC mode and mapping
     mov al,0x11                 ; Start init, use ICW4, edge triggered
     out 0x20,al                 ; ICW1 to master PIC port
@@ -232,6 +258,21 @@ End:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp End                     ; Jump to 'End' label in infinite loop
 
+; Function: SetHandler
+;
+; Purpose: Sets up an interrupt handler in the IDT (Interrupt Descriptor Table)
+; Parameters: rdi - address of the IDT entry, ax - lower 16 bits of handler
+; address
+; The function takes a 64-bit handler address in rax and updates the IDT entry
+; pointed to by rdi.
+SetHandler:
+    mov [rdi],ax                ; Store lower 16 bits of handler address
+    shr rax,16                  ; Shift right handler address by 16 bits
+    mov [rdi+6],ax              ; Store middle 16 bits of handler address
+    shr rax,16                  ; Shift right handler address by 16 more bits
+    mov [rdi+8],eax             ; Store highest 32 bits of handler address
+    ret                         ; Return from function
+
 UserEntry:
     inc byte[0xb8010]           ; Increment ASCII code of second char
     mov byte[0xb8011],0xF       ; move 0xF (white on black) to the video memory
@@ -260,6 +301,30 @@ Timer:
     pop_regs                    ; Restore the registers
     iretq                       ; Return from interrupt/exception to user mode
 
+; SIRQ Routine
+; Purpose: Checks if a spurious interrupt has occurred and acknowledges it
+; Parameters: None
+; Return Value: None
+; Registers Used: al
+; Flags Modified: None
+; Assumptions: None
+; Side Effects: None
+SIRQ:
+    push_regs                   ; Save the registers on the stack
+
+    mov al,11                   ; Move 11 to al
+    out 0x20,al                 ; Send the EOI command to the master PIC
+    in al,0x20                  ; Read the ISR from the master PIC
+
+    test al,(1<<7)              ; Test if the highest bit of ISR is set
+    jz .end                     ; If not, jump to the end of the routine
+
+    mov al,0x20                 ; Move 0x20 to al
+    out 0x20,al                 ; Send the EOI command again to the master PIC
+
+.end:
+    pop_regs                    ; Restore the registers from the stack
+    iretq                       ; Return from interrupt
 
 ; This code defines a 64-bit GDT descriptor, which is a table that contains
 ; information about the segments and tasks in the system.
