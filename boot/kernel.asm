@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        11/02/2023 10:50 PM
+; @date:        11/04/2023 08:30 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -46,11 +46,23 @@
 ;                   - The divide by 0 handler writes 'D' in red color to the
 ;                     video memory and halts the CPU.
 ;
+;                   - The timer handler increments the ASCII code of the third
+;                     character on the screen and sets its attribute to 0xE,
+;                     which is yellow-on-black.
+;
+;                   - The expected output is a changing character in white and
+;                     yellow colors on the top left corner of the screen, every
+;                     10 milliseconds.
+;
 ;                   - The timer handler writes 'T' in yellow color to the video
 ;                     memory and returns from the interrupt.
 ;
 ;                   - The expected output is 'KT' in green and yellow colors on
 ;                     the screen, every 10 milliseconds.
+;
+;                   - Jumps to the user entry point in ring 3 and increments
+;                     the ASCII code of the second char in white color to the
+;                     video memory.
 ;
 ;                   - Switches to ring 3 by pushing the values for CS, RFLAGS,
 ;                     offset, interrupt number, DS, and UserEntry address on
@@ -88,7 +100,11 @@
 ;
 ; Revision 0.7: 11/02/2023 Marko Trickovic
 ; Revised the code to add TSS support.
-;------------------------------------------------------------------------------
+;
+; Revision 0.8  11/04/2023  Marko Trickovic
+; Modified UserEntry function and timer interrupt handler to increment the
+; ASCII code of the second and third characters on the screen, respectively.
+; -----------------------------------------------------------------------------
 
 [BITS 64]                       ; Use 64-bit mode
 [ORG 0x200000]                  ; Set origin to Kernel address
@@ -210,23 +226,18 @@ InitPIC:                        ; Set PIC mode and mapping
     push 0x202                  ; interrupt number for iretq
     push 0x10|3                 ; protected mode DS and reserved
     push UserEntry              ; UserEntry address
-    iretq                       ; return and jump to UserEntry in long mode
+    iretq                       ; Return from interrupt/exception to user mode
 
 End:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp End                     ; Jump to 'End' label in infinite loop
 
 UserEntry:
-    mov ax,cs                   ; move the code segment selector to ax
-    and al,11b                  ; mask the lower byte of ax with 11b
-    cmp al,3                    ; compare the lower byte of ax with 3
-    jne UEnd                    ; jump to UEnd if not equal
-
-    mov byte[0xb8010],'U'       ; move 'U' to the video memory address
-    mov byte[0xb8011],0xE       ; move 0xE (white on black) to the video memory
+    inc byte[0xb8010]           ; Increment ASCII code of second char
+    mov byte[0xb8011],0xF       ; move 0xF (white on black) to the video memory
 
 UEnd:
-    jmp UEnd                    ; loop indefinitely
+    jmp UserEntry               ; loop indefinitely
 
 Handler0:
     push_regs                   ; Save the registers
@@ -235,19 +246,19 @@ Handler0:
 
     jmp End                     ; Jump to 'End' label in infinite loop
 
-    pop_regs                    ; Restore the registers
-
-    iretq
+    pop_regs                    ; Restore the rsegisters
+    iretq                       ; Return from interrupt/exception to user mode
 
 Timer:
     push_regs                   ; Save the registers
-    mov byte[0xb8020],'T'       ; Write 'T' to video memory
-    mov byte[0xb8021],0xe
-    jmp End                     ; Jump to 'End' label in infinite loop
+    inc byte[0xb8020]           ; Increment ASCII code of third char
+    mov byte[0xb8021],0xe       ; Set attribute to yellow-on-black
+
+    mov al,0x20                 ; Move EOI code to AL
+    out 0x20,al                 ; Send EOI to PIC
 
     pop_regs                    ; Restore the registers
-
-    iretq
+    iretq                       ; Return from interrupt/exception to user mode
 
 
 ; This code defines a 64-bit GDT descriptor, which is a table that contains
