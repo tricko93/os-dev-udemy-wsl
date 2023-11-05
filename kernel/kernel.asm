@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        11/04/2023 11:55 PM
+; @date:        11/05/2023 05:15 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -67,6 +67,11 @@
 ;                   - Added a code snippet to set the TSS descriptor in the GDT
 ;                     and load the TR with the TSS selector.
 ;
+;                   - Compile kernel.asm as elf64 and update code accordingly.
+;
+;                   - Call KMain function from kernel.asm at physical address
+;                     0x200000.
+;
 ; Usage: make
 ;
 ; Revision History:
@@ -101,28 +106,46 @@
 ; the IDT.
 ; Implemented the spurious interrupt handler that checks if a spurious
 ; interrupt has occurred and acknowledges it.
+;
+; Revision 1.0: 11/05/2023 Marko Trickovic
+; Bootstrap C code from assembly.
 ;------------------------------------------------------------------------------
 
-[BITS 64]                       ; Use 64-bit mode
-[ORG 0x200000]                  ; Set origin to Kernel address
+section .data
 
-%macro push_regs 0              ; Define macro for saving the registers
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push rbp
-    push r8
-    push r9
-    push r10
-    push r11
-    push r12
-    push r13
-    push r14
-    push r15
-%endmacro
+; This code defines a 64-bit GDT descriptor, which is a table that contains
+; information about the segments and tasks in the system.
+; The GDT descriptor has four entries:
+; - Null entry: this entry is required and must be zero.
+; - Code segment: this entry defines the code segment for long mode, which is
+;   the 64-bit operating mode of the processor.
+; - Data segment: this entry defines the data segment for long mode, which is
+;   where the program data is stored.
+; - TSS segment: this entry defines the task state segment (TSS) for long mode,
+;   which is a structure that holds information about a task, such as processor
+;   register state, I/O port permissions, inner-level stack pointers, and
+;   previous TSS link.
+; The TSS segment entry has the following fields:
+; - Limit: the 16-bit size of the TSS.
+; - Base: the 64-bit linear base address of the TSS.
+; - Type: the type of the TSS, either 9 for non-busy or 11 for busy.
+; - DPL: the descriptor privilege level, which determines who can access the
+; TSS descriptor.
+; - P: the present bit, which indicates whether the TSS is in memory or not.
+; - G: the granularity bit, which determines how the limit is interpreted.
+Gdt64:                          ; 64-bit GDT descriptor, zero-initialized
+    dq 0                        ; Null entry, required
+    dq 0x0020980000000000       ; Long mode code segment, ring 0
+    dq 0x0020f80000000000       ; Long mode data segment, ring 0
+    dq 0x0000f20000000000       ; Long mode TSS segment, ring 0
+TssDesc:
+    dw TssLen-1                 ; Limit of TSS
+    dw 0                        ; Base of TSS (low)
+    db 0                        ; Base of TSS (middle)
+    db 0x89                     ; Type (9), DPL (0), P (1)
+    db 0                        ; Limit (high), G (0)
+    db 0                        ; Base of TSS (high)
+    dq 0                        ; Base of TSS (upper)
 
 %macro pop_regs 0               ; Define macro for restoring the registers
     pop	r15
@@ -142,8 +165,35 @@
     pop	rax
 %endmacro
 
-; start Label
-; Purpose: Sets up the interrupt handling mechanism and switches to 64-bit mode
+Gdt64Len: equ $-Gdt64           ; Length of Gdt64
+
+
+Gdt64Ptr: dw Gdt64Len-1         ; (Length of Gdt64)-1
+          dq Gdt64              ; Address of Gdt64
+
+; TSS descriptor for current task
+; TSS holds info about a task, e.g. registers, I/O, stacks, link
+; - Base: 32-bit linear address of TSS
+; - Limit: 20-bit size of TSS
+; - Type: 9 for non-busy or 11 for busy
+; - DPL: privilege level of descriptor
+; - P: present bit, 1 if TSS in memory
+; - G: granularity bit, how limit is interpreted
+; More info:
+Tss:
+    dd 0                        ; First 32 bits reserved, zero
+    dq 0x150000                 ; Next 64 bits are base address
+    times 88 db 0               ; Next 88 bytes reserved, zero
+    dd TssLen                   ; Last 32 bits are limit
+
+TssLen: equ $-Tss               ; Label for size of TSS
+
+section .text
+extern KMain
+global start
+
+; Label: start
+; Purpose: Sets up the GDT
 ; Parameters: None
 ; Return Value: None
 ; Registers Used: rdi, rax
@@ -151,23 +201,9 @@
 ; Assumptions: None
 ; Side Effects: None
 start:
-    mov rdi,Idt                 ; Load IDT base address into rdi
-
-    mov rax,Handler0            ; Set the first IDT entry to point to Handler0
-    call SetHandler
-
-    mov rax,Timer               ; Set the second IDT entry to point to Timer
-    mov rdi,Idt+32*16
-    call SetHandler
-
-    mov rdi,Idt+32*16+7*16      ; Move to the seventh IDT entry
-    mov rax,SIRQ                ; Set the third IDT entry to point to SIRQ
-    call SetHandler
-
     lgdt [Gdt64Ptr]             ; Load GDT pointer
-    lidt [IdtPtr]               ; Load IDT pointer
 
-; SetTss Routine
+; Routine: SetTss
 ; Purpose: Sets up the Task State Segment (TSS) descriptor in the GDT and
 ; loads the TR with the TSS selector
 ; Parameters: None
@@ -175,7 +211,7 @@ start:
 ; Registers Used: rax, ax
 ; Flags Modified: None
 ; Assumptions: None
-; Side Effects: Switches to 64-bit mode and jumps to the kernel entry point
+; Side Effects: None
 SetTss:
     mov rax,Tss                 ; Base address of TSS to RAX
     mov [TssDesc+2],ax          ; Low 16 bits of RAX to bytes 2 and 3
@@ -185,18 +221,8 @@ SetTss:
     mov [TssDesc+7],al          ; Low 8 bits of RAX to byte 7
     shr rax,8                   ; Shift RAX right by 8 bits
     mov [TssDesc+8],eax         ; Low 32 bits of RAX to bytes 8 to 11
-
     mov ax,0x20                 ; Segment selector for TSS descriptor to AX
     ltr ax                      ; Load TR with AX
-
-    push 8                      ; Push the code segment selector
-    push KernelEntry            ; Push the kernel entry point address
-    db 0x48                     ; Use the REX prefix to indicate 64-bit operand
-    retf                        ; Return far
-
-KernelEntry:
-    mov byte[0xb8000],'K'       ; Write 'K' to video memory
-    mov byte[0xb8001],0xa       ; Green color
 
 ; Routine: InitPIT
 ; Purpose: Sets up the Programmable Interval Timer (PIT) mode and frequency
@@ -247,157 +273,15 @@ InitPIC:                        ; Set PIC mode and mapping
     mov al,11111111b            ; Disable all IRQs for slave PIC
     out 0xa1,al                 ; IMR to slave PIC port
 
-    push 0x18|3                 ; long mode CS and RFLAGS
-    push 0x7c00                 ; user entry offset
-    push 0x202                  ; interrupt number for iretq
-    push 0x10|3                 ; protected mode DS and reserved
-    push UserEntry              ; UserEntry address
-    iretq                       ; Return from interrupt/exception to user mode
+    push 8                      ; Push the code segment selector onto the stack
+    push KernelEntry            ; Push the KernelEntry point onto the stack
+    db 0x48                     ; Encode a REX.W prefix to use 64-bit operands
+    retf                        ; Return to 64-bit KernelEntry
+
+KernelEntry:
+    mov rsp,0x200000            ; Adjust Kernel stack pointer
+    call KMain                  ; Call the KMain function (in C file)
 
 End:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp End                     ; Jump to 'End' label in infinite loop
-
-; Function: SetHandler
-;
-; Purpose: Sets up an interrupt handler in the IDT (Interrupt Descriptor Table)
-; Parameters: rdi - address of the IDT entry, ax - lower 16 bits of handler
-; address
-; The function takes a 64-bit handler address in rax and updates the IDT entry
-; pointed to by rdi.
-SetHandler:
-    mov [rdi],ax                ; Store lower 16 bits of handler address
-    shr rax,16                  ; Shift right handler address by 16 bits
-    mov [rdi+6],ax              ; Store middle 16 bits of handler address
-    shr rax,16                  ; Shift right handler address by 16 more bits
-    mov [rdi+8],eax             ; Store highest 32 bits of handler address
-    ret                         ; Return from function
-
-UserEntry:
-    inc byte[0xb8010]           ; Increment ASCII code of second char
-    mov byte[0xb8011],0xF       ; move 0xF (white on black) to the video memory
-
-UEnd:
-    jmp UserEntry               ; loop indefinitely
-
-Handler0:
-    push_regs                   ; Save the registers
-    mov byte[0xb8000],'D'       ; Write 'D' to video memory
-    mov byte[0xb8001],0xc       ; Red color
-
-    jmp End                     ; Jump to 'End' label in infinite loop
-
-    pop_regs                    ; Restore the rsegisters
-    iretq                       ; Return from interrupt/exception to user mode
-
-Timer:
-    push_regs                   ; Save the registers
-    inc byte[0xb8020]           ; Increment ASCII code of third char
-    mov byte[0xb8021],0xe       ; Set attribute to yellow-on-black
-
-    mov al,0x20                 ; Move EOI code to AL
-    out 0x20,al                 ; Send EOI to PIC
-
-    pop_regs                    ; Restore the registers
-    iretq                       ; Return from interrupt/exception to user mode
-
-; SIRQ Routine
-; Purpose: Checks if a spurious interrupt has occurred and acknowledges it
-; Parameters: None
-; Return Value: None
-; Registers Used: al
-; Flags Modified: None
-; Assumptions: None
-; Side Effects: None
-SIRQ:
-    push_regs                   ; Save the registers on the stack
-
-    mov al,11                   ; Move 11 to al
-    out 0x20,al                 ; Send the EOI command to the master PIC
-    in al,0x20                  ; Read the ISR from the master PIC
-
-    test al,(1<<7)              ; Test if the highest bit of ISR is set
-    jz .end                     ; If not, jump to the end of the routine
-
-    mov al,0x20                 ; Move 0x20 to al
-    out 0x20,al                 ; Send the EOI command again to the master PIC
-
-.end:
-    pop_regs                    ; Restore the registers from the stack
-    iretq                       ; Return from interrupt
-
-; This code defines a 64-bit GDT descriptor, which is a table that contains
-; information about the segments and tasks in the system.
-; The GDT descriptor has four entries:
-; - Null entry: this entry is required and must be zero.
-; - Code segment: this entry defines the code segment for long mode, which is
-;   the 64-bit operating mode of the processor.
-; - Data segment: this entry defines the data segment for long mode, which is
-;   where the program data is stored.
-; - TSS segment: this entry defines the task state segment (TSS) for long mode,
-;   which is a structure that holds information about a task, such as processor
-;   register state, I/O port permissions, inner-level stack pointers, and
-;   previous TSS link.
-; The TSS segment entry has the following fields:
-; - Limit: the 16-bit size of the TSS.
-; - Base: the 64-bit linear base address of the TSS.
-; - Type: the type of the TSS, either 9 for non-busy or 11 for busy.
-; - DPL: the descriptor privilege level, which determines who can access the
-; TSS descriptor.
-; - P: the present bit, which indicates whether the TSS is in memory or not.
-; - G: the granularity bit, which determines how the limit is interpreted.
-Gdt64:                          ; 64-bit GDT descriptor, zero-initialized
-    dq 0                        ; Null entry, required
-    dq 0x0020980000000000       ; Long mode code segment, ring 0
-    dq 0x0020f80000000000       ; Long mode data segment, ring 0
-    dq 0x0000f20000000000       ; Long mode TSS segment, ring 0
-TssDesc:
-    dw TssLen-1                 ; Limit of TSS
-    dw 0                        ; Base of TSS (low)
-    db 0                        ; Base of TSS (middle)
-    db 0x89                     ; Type (9), DPL (0), P (1)
-    db 0                        ; Limit (high), G (0)
-    db 0                        ; Base of TSS (high)
-    dq 0                        ; Base of TSS (upper)
-
-
-Gdt64Len: equ $-Gdt64           ; Length of Gdt64
-
-
-Gdt64Ptr: dw Gdt64Len-1         ; (Length of Gdt64)-1
-          dq Gdt64              ; Address of Gdt64
-
-
-Idt:                            ; IDT descriptor
-    %rep 256                    ; Define 256 IDT entries, each 16 bytes long
-        dw 0                    ; Offset low
-        dw 0x8                  ; Selector (code segment)
-        db 0                    ; IST (stack index)
-        db 0x8e                 ; Type and attributes
-        dw 0                    ; Offset middle
-        dd 0                    ; Offset high
-        dd 0                    ; Reserved
-    %endrep
-
-IdtLen: equ $-Idt               ; Length of IDT
-
-IdtPtr: dw IdtLen-1             ; Length of IDT-1
-        dq Idt                  ; Address of Idt
-
-
-; TSS descriptor for current task
-; TSS holds info about a task, e.g. registers, I/O, stacks, link
-; - Base: 32-bit linear address of TSS
-; - Limit: 20-bit size of TSS
-; - Type: 9 for non-busy or 11 for busy
-; - DPL: privilege level of descriptor
-; - P: present bit, 1 if TSS in memory
-; - G: granularity bit, how limit is interpreted
-; More info:
-Tss:
-    dd 0                        ; First 32 bits reserved, zero
-    dq 0x150000                 ; Next 64 bits are base address
-    times 88 db 0               ; Next 88 bytes reserved, zero
-    dd TssLen                   ; Last 32 bits are limit
-
-TssLen: equ $-Tss               ; Label for size of TSS
