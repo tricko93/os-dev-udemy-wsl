@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        11/05/2023 05:15 PM
+; @date:        11/06/2023 11:45 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -29,43 +29,22 @@
 ;
 ;               The code does the following:
 ;
-;                   - Sets up the Global Descriptor Table (GDT) and the
-;                     Interrupt Descriptor Table (IDT) for handling interrupts
-;                     and exceptions.
-;
-;                   - Switches to 64-bit mode and writes 'K' in green color to
-;                     the video memory.
-;
-;                   - Initializes the Programmable Interval Timer (PIT) and the
-;                     Programmable Interrupt Controller (PIC) to generate
-;                     periodic timer interrupts.
-;
-;                   - Defines two handler functions: one for the divide by 0
-;                     exception and one for the timer interrupt.
-;
-;                   - The divide by 0 handler writes 'D' in red color to the
-;                     video memory and halts the CPU.
-;
-;                   - The timer handler increments the ASCII code of the third
-;                     character on the screen and sets its attribute to 0xE,
-;                     which is yellow-on-black.
-;
-;                   - The expected output is a changing character in white and
-;                     yellow colors on the top right corner of the screen,
-;                     every 10 milliseconds.
-;
-;                   - Jumps to the user entry point in ring 3 and increments
-;                     the ASCII code of the second char in white color to the
-;                     video memory.
-;
-;                   - Switches to ring 3 by pushing the values for CS, RFLAGS,
-;                     offset, interrupt number, DS, and UserEntry address on
-;                     the stack and returning from interrupt.
+;                   - Set up the Global Descriptor Table (GDT).
 ;
 ;                   - Added a TSS descriptor definition for the current task.
 ;
 ;                   - Added a code snippet to set the TSS descriptor in the GDT
 ;                     and load the TR with the TSS selector.
+;
+;                   - Switches to 64-bit mode and calls KMain function.
+;
+;                   - Initializes the Programmable Interval Timer (PIT) and the
+;                     Programmable Interrupt Controller (PIC) to generate
+;                     periodic timer interrupts.
+;
+;                   - Switches to ring 3 by pushing the values for CS, RFLAGS,
+;                     offset, interrupt number, DS, and UserEntry address on
+;                     the stack and returning from interrupt.
 ;
 ;                   - Compile kernel.asm as elf64 and update code accordingly.
 ;
@@ -76,39 +55,42 @@
 ;
 ; Revision History:
 ;
-; Revision 0.1: 10/30/2023 Marko Trickovic
-; Initial creation of the Kernel assembly program.
+;   - Revision 0.1: 10/30/2023 Marko Trickovic
+;     Initial creation of the Kernel assembly program.
 ;
-; Revision 0.2: 10/30/2023 Marko Trickovic
-; Reload GDT and switch to 64-bit mode.
+;   - Revision 0.2: 10/30/2023 Marko Trickovic
+;     Reload GDT and switch to 64-bit mode.
 ;
-; Revision 0.3: 10/30/2023 Marko Trickovic
-; Set up and load IDT. Implement and test divide by 0 exception handling.
+;   - Revision 0.3: 10/30/2023 Marko Trickovic
+;     Set up and load IDT. Implement and test divide by 0 exception handling.
 ;
-; Revision 0.4: 10/31/2023 Marko Trickovic
-; Define and use push/pop macros in interrupt handlers.
+;   - Revision 0.4: 10/31/2023 Marko Trickovic
+;     Define and use push/pop macros in interrupt handlers.
 ;
-; Revision 0.5: 10/31/2023 Marko Trickovic
-; Set up and test timer interrupt handler in 64-bit kernel.
+;   - Revision 0.5: 10/31/2023 Marko Trickovic
+;     Set up and test timer interrupt handler in 64-bit kernel.
 ;
-; Revision 0.6: 11/01/2023 Marko Trickovic
-; Added the code for switching to ring 3 and jumping to the UserEntry point.
+;   - Revision 0.6: 11/01/2023 Marko Trickovic
+;     Added the code for switching to ring 3 and jumping to the UserEntry point.
 ;
-; Revision 0.7: 11/02/2023 Marko Trickovic
-; Revised the code to add TSS support.
+;   - Revision 0.7: 11/02/2023 Marko Trickovic
+;     Revised the code to add TSS support.
 ;
-; Revision 0.8: 11/04/2023 Marko Trickovic
-; Modified UserEntry function and timer interrupt handler to increment the
-; ASCII code of the second and third characters on the screen, respectively.
+;   - Revision 0.8: 11/04/2023 Marko Trickovic
+;     Modified UserEntry function and timer interrupt handler to increment the
+;     ASCII code of the second and third characters on the screen, respectively.
 ;
-; Revision 0.9: 11/04/2023 Marko Trickovic
-; Implemented the SetHandler function that sets up an interrupt handler in
-; the IDT.
-; Implemented the spurious interrupt handler that checks if a spurious
-; interrupt has occurred and acknowledges it.
+;   - Revision 0.9: 11/04/2023 Marko Trickovic
+;     Implemented the SetHandler function that sets up an interrupt handler in
+;     the IDT.
+;     Implemented the spurious interrupt handler that checks if a spurious
+;     interrupt has occurred and acknowledges it.
 ;
-; Revision 1.0: 11/05/2023 Marko Trickovic
-; Bootstrap C code from assembly.
+;   - Revision 1.0: 11/05/2023 Marko Trickovic
+;     Bootstrap C code from assembly.
+;
+;   - Revision 1.1: 11/06/2023 Marko Trickovic
+;     Enable interrupts and set stack segment offset to 0.
 ;------------------------------------------------------------------------------
 
 section .data
@@ -279,8 +261,12 @@ InitPIC:                        ; Set PIC mode and mapping
     retf                        ; Return to 64-bit KernelEntry
 
 KernelEntry:
+    xor ax,ax                   ; Clear AX
+    mov ss,ax                   ; Set SS to 0
+
     mov rsp,0x200000            ; Adjust Kernel stack pointer
     call KMain                  ; Call the KMain function (in C file)
+    sti                         ; Enable interrutps
 
 End:
     hlt                         ; Halt CPU until external interrupt jmp

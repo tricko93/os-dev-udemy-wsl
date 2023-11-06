@@ -5,18 +5,24 @@
  * @license:     MIT
  * @language:    C
  * @platform:    x86_64
- * @description: This file contains the KMain function that initializes the
- *               system, prints a character on the screen as a test that C code
- *               is bootstrapped.
+ * @description: This file contains the KMain function that is invoked to do
+ *               the system initialization of components, such as the interrupt
+ *               descriptor table, the console, the timer, and the keyboard.
  *
- * Revision 0.1: 11/06/2023 Marko Trickovic
- * Initial version that prints a character.
+ * Revision History:
+ *
+ *   - Revision 0.1: 11/06/2023 Marko Trickovic
+ *     Initial version that prints a character.
+ *
+ *   - Revision 0.2: 11/06/2023 Marko Trickovic
+ *     Implement trap handling. Test the trap handling in KMain.
+ * 
+ * Part of the os-dev-udemy-wsl.
  *****************************************************************************/
+
+#include "trap.h"
 
 void KMain(void)
 {
-    char* p = (char*)0xb8000;
-
-    p[0] = 'C';
-    p[1] = 0xa;
+    init_idt();
 }
