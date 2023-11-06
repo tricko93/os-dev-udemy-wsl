@@ -7,7 +7,7 @@ include ../global.mak
 CFLAGS = -std=c99 -mcmodel=large -ffreestanding -fno-stack-protector -mno-red-zone
 
 # Define all obj files
-ALL_OBJS = kernel.o main.o
+ALL_OBJS = kernel.o main.o trapa.o trap.o
 
 # Define the default target
 .PHONY: all
@@ -17,6 +17,10 @@ all: $(ALL_OBJS) link
 kernel.o: kernel.asm
 	$(NASM) -f elf64 -lkernel.lst -o $@ $<
 
+# Define a rule for assembling the trap.asm
+trapa.o: trap.asm
+	$(NASM) -f elf64 -ltrapa.lst -o $@ $<
+
 # Define a rule to compile all C code
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
@@ -24,7 +28,7 @@ kernel.o: kernel.asm
 # Define a rule for linking kernel
 .PHONY: link
 link:
-	ld -nostdlib -T ../link.lds -o kernel $(ALL_OBJS)
+	ld -nostdlib -T link.lds -o kernel $(ALL_OBJS)
 	objcopy -O binary kernel kernel.bin
 	rm kernel
 
