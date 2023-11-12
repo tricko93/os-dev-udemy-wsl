@@ -1,31 +1,12 @@
 ;------------------------------------------------------------------------------
 ; @file:        kernel.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        11/06/2023 11:45 PM
+; @date:        11/12/2023 10:34 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
 ; @description: This is the source code file for the kernel of a 64-bit
-;               operating system. The code sets up the Global Descriptor Table
-;               (GDT) and the Interrupt Descriptor Table (IDT) for handling
-;               interrupts and exceptions and jumps to a kernel entry point.
-;               The NASM syntax is used, and the origin is set to 0x200000, the
-;               address where the bootloader loads the kernel.
-;               The code also switches to 64-bit mode and writes ‘K’ in green
-;               color to the video memory.
-;
-;               The code initializes the GDT pointer using the lgdt
-;               instruction, which takes a 48-bit operand consisting of a
-;               16-bit limit and a 32-bit base address. Subsequently, the code
-;               pushes the code segment selector (8) and the kernel entry point
-;               address (KernelEntry) onto the stack. A far return instruction
-;               (retf) is used to jump to the kernel code segment.
-;
-;               The kernel entry point writes a character 'K' with a green
-;               color to the video memory at address 0xB8000, the start of the
-;               VGA text mode buffer. The code then enters an infinite loop of
-;               halting the CPU until an external interrupt occurs, and then
-;               jumping back to the halt instruction.
+;               operating system.
 ;
 ;               The code does the following:
 ;
@@ -115,6 +96,12 @@ section .data
 ; TSS descriptor.
 ; - P: the present bit, which indicates whether the TSS is in memory or not.
 ; - G: the granularity bit, which determines how the limit is interpreted.
+
+; @var:         Gdt32
+;
+; @brief:       A 64-bit GDT descriptor that contains the code and data segment
+;               descriptors for protected mode.
+;
 Gdt64:                          ; 64-bit GDT descriptor, zero-initialized
     dq 0                        ; Null entry, required
     dq 0x0020980000000000       ; Long mode code segment, ring 0
@@ -147,9 +134,17 @@ TssDesc:
     pop	rax
 %endmacro
 
+; @var:         Gdt64Len
+;
+; @brief:       A constant that holds the length of the Gdt64 descriptor.
+;
 Gdt64Len: equ $-Gdt64           ; Length of Gdt64
 
-
+; @var:         Gdt64Ptr
+;
+; @brief:       A 10-byte structure that contains the length and address of the
+;               Gdt64 descriptor.
+;
 Gdt64Ptr: dw Gdt64Len-1         ; (Length of Gdt64)-1
           dq Gdt64              ; Address of Gdt64
 
@@ -162,6 +157,13 @@ Gdt64Ptr: dw Gdt64Len-1         ; (Length of Gdt64)-1
 ; - P: present bit, 1 if TSS in memory
 ; - G: granularity bit, how limit is interpreted
 ; More info:
+
+; @var:         Tss
+;
+; @brief:       A 64-bit task state segment (TSS) that holds information about
+;               a task, such as processor register state, I/O port permissions,
+;               inner-level stack pointers, and previous TSS link.
+;
 Tss:
     dd 0                        ; First 32 bits reserved, zero
     dq 0x150000                 ; Next 64 bits are base address
@@ -170,30 +172,57 @@ Tss:
 
 TssLen: equ $-Tss               ; Label for size of TSS
 
+;
+; @brief:       The section that contains the executable code of the program.
+;
+; @note:        The .text section is also known as the code segment.
+;
 section .text
-extern KMain
-global start
 
-; Label: start
-; Purpose: Sets up the GDT
-; Parameters: None
-; Return Value: None
-; Registers Used: rdi, rax
-; Flags Modified: None
-; Assumptions: None
-; Side Effects: None
+; @directive:   extern
+;
+; @brief:       The directive that tells the assembler to look for the
+;               definition of a symbol in another object file or library.
+;
+; @param:       KMain  The name of the symbol that is declared as external.
+;
+; @note:        The extern directive is used to link the program with other
+;               modules or libraries that contain the definition of the symbol.
+;
+extern KMain                    ; Declare an external symbol named KMain
+
+; @directive:   global
+;
+; @brief:       The directive that tells the assembler to make a symbol visible
+;               to other object files or libraries.
+;
+; @param:       start  The name of the symbol that is declared as global.
+;
+; @note:        The global directive is used to export the symbol to the linker,
+;               which can then resolve the references to the symbol from other
+;               modules or libraries. The start symbol is usually the entry
+;               point of the program.
+global start                    ; Declare a global symbol named start
+
+; @routine:     start
+; @brief:       The entry point of the program, which sets up the processor and
+;               the memory for the execution of the main program.
+;
+; @return:      None, as this routine does not return to the caller, but jumps
+;               to the KMain routine, which is the main function of the kernel.
+;
 start:
-    lgdt [Gdt64Ptr]             ; Load GDT pointer
+    lgdt [Gdt64Ptr]             ; Load GDT pointer into the GDTR register
 
-; Routine: SetTss
-; Purpose: Sets up the Task State Segment (TSS) descriptor in the GDT and
-; loads the TR with the TSS selector
-; Parameters: None
-; Return Value: None
-; Registers Used: rax, ax
-; Flags Modified: None
-; Assumptions: None
-; Side Effects: None
+; @routine:     SetTss
+; @brief:       Sets the base address and the segment selector of the TSS in the
+;               TSS descriptor and the TR register.
+;
+; @param:       rax   The new base address of the TSS, a 64-bit value.
+;
+; @return:      None, as this routine does not return any value, but modifies
+;               the TSS descriptor and the TR register.
+;
 SetTss:
     mov rax,Tss                 ; Base address of TSS to RAX
     mov [TssDesc+2],ax          ; Low 16 bits of RAX to bytes 2 and 3
@@ -206,14 +235,16 @@ SetTss:
     mov ax,0x20                 ; Segment selector for TSS descriptor to AX
     ltr ax                      ; Load TR with AX
 
-; Routine: InitPIT
-; Purpose: Sets up the Programmable Interval Timer (PIT) mode and frequency
-; Parameters: None
-; Return Value: None
-; Registers Used: al, ax
-; Flags Modified: None
-; Assumptions: None
-; Side Effects: Generates periodic timer interrupts at 100 Hz
+; @routine:     InitPIT
+; @brief:       Initializes the programmable interval timer (PIT) to generate
+;               periodic interrupts at a specified frequency.
+;
+; @param:       al    The command byte that specifies the mode and access mode
+;                     of the PIT channel 0.
+;
+; @return:      None, as this routine does not return any value, but configures
+;               the PIT registers and ports.
+;
 InitPIT:                        ; Set PIT mode and frequency
     mov al,(1<<2)|(3<<4)        ; Rate generator, low/high
     out 0x43,al                 ; Command byte to PIT port
@@ -223,51 +254,122 @@ InitPIT:                        ; Set PIT mode and frequency
     mov al,ah                   ; High byte to al
     out 0x40,al                 ; High byte to PIT channel 0 port
 
-; Routine: InitPIC
-; Purpose: Sets up the Programmable Interrupt Controller (PIC) mode and mapping
-; Parameters: None
-; Return Value: None
-; Registers Used: al
-; Flags Modified: None
-; Assumptions: None
-; Side Effects: Enables the timer interrupt and switches to user mode
+; @routine:     InitPIC
+; @brief:       Initializes the programmable interrupt controller (PIC) to
+;               handle hardware interrupts from various devices.
+;
+; @param:       al    The byte value that is sent to the PIC ports to configure
+;                     the PIC mode, mapping, and masking.
+;
+; @return:      None, as this routine does not return any value, but sets up the
+;               PIC registers and ports.
+;
 InitPIC:                        ; Set PIC mode and mapping
     mov al,0x11                 ; Start init, use ICW4, edge triggered
     out 0x20,al                 ; ICW1 to master PIC port
     out 0xa0,al                 ; ICW1 to slave PIC port
+    ; @note:       The ICW1 is the initialization command word 1, which tells
+    ;              the PIC to start the initialization process and use the ICW4
+    ;              to specify more details. The edge triggered mode means that
+    ;              the PIC will respond to the rising edge of the interrupt
+    ;              signal.
 
     mov al,32                   ; Map IRQ0-7 to INT 20h-27h for master PIC
     out 0x21,al                 ; ICW2 to master PIC port
     mov al,40                   ; Map IRQ8-15 to INT 28h-2Fh for slave PIC
     out 0xa1,al                 ; ICW2 to slave PIC port
+    ; @note:       The ICW2 is the initialization command word 2, which tells
+    ;              the PIC the base address of the interrupt vector for each
+    ;              PIC. The IRQs are the interrupt requests from the devices,
+    ;              and the INTs are the interrupt service routines in the IDT.
+    ;              The master PIC handles IRQ0-7, and the slave PIC handles
+    ;              IRQ8-15.
 
     mov al,4                    ; Connect IRQ2 of master PIC to slave PIC
     out 0x21,al                 ; ICW3 to master PIC port
     mov al,2                    ; Connect slave PIC to IRQ2 of master PIC
     out 0xa1,al                 ; ICW3 to slave PIC port
+    ; @note:       The ICW3 is the initialization command word 3, which tells
+    ;              the PIC how the master and slave PICs are connected. The
+    ;              master PIC needs a bit mask to indicate which IRQ is
+    ;              connected to the slave PIC, and the slave PIC needs a number
+    ;              to indicate which IRQ of the master PIC it is connected to.
 
     mov al,1                    ; Use 8086 mode for both PICs
     out 0x21,al                 ; ICW4 to master PIC port
     out 0xa1,al                 ; ICW4 to slave PIC port
+    ; @note:       The ICW4 is the initialization command word 4, which tells
+    ;              the PIC some additional details about the operation mode. The
+    ;              8086 mode means that the PIC will use the 8086 interrupt
+    ;              sequence.
 
     mov al,11111110b            ; Only IRQ0 (timer) on for master PIC
     out 0x21,al                 ; IMR to master PIC port
     mov al,11111111b            ; Disable all IRQs for slave PIC
     out 0xa1,al                 ; IMR to slave PIC port
+    ; @note:       The IMR is the interrupt mask register, which tells the PIC
+    ;              which IRQs are enabled or disabled. A 1 means disabled, and a
+    ;              0 means enabled. The timer is the only device that is enabled
+    ;              for the master PIC, and all devices are disabled for the
+    ;              slave PIC.
 
     push 8                      ; Push the code segment selector onto the stack
     push KernelEntry            ; Push the KernelEntry point onto the stack
     db 0x48                     ; Encode a REX.W prefix to use 64-bit operands
     retf                        ; Return to 64-bit KernelEntry
+    ; @note:       The code segment selector is 8, which is the index of the
+    ;              code segment descriptor in the GDT. The KernelEntry is the
+    ;              label of the entry point of the kernel. The REX.W prefix is
+    ;              used to override the default operand size of 32 bits to 64
+    ;              bits. The retf instruction is the far return, which pops the
+    ;              code segment selector and the offset from the stack and jumps
+    ;              to the 64-bit KernelEntry.
 
+; @routine:     KernelEntry
+; @brief:       The entry point of the kernel, which sets up the stack and the
+;               long mode for the processor.
+;
+; @param:       ax    The register that is used to clear and set the stack
+;                     segment selector and the stack pointer.
+; @param:       ss    The stack segment selector that is used to access the
+;                     stack.
+;
+; @return:      None, as this routine does not return to the caller, but jumps
+;               to the KMain routine, which is the main function of the kernel.
+;
 KernelEntry:
     xor ax,ax                   ; Clear AX
     mov ss,ax                   ; Set SS to 0
+    ; @note:       The stack segment selector is cleared to 0, which means that
+    ;              the stack segment descriptor in the GDT is used. The stack
+    ;              segment descriptor has a base address of 0 and a limit of
+    ;              0xFFFFFFFF, which means that the stack can use the entire
+    ;              4 GB of memory.
 
     mov rsp,0x200000            ; Adjust Kernel stack pointer
-    call KMain                  ; Call the KMain function (in C file)
-    sti                         ; Enable interrutps
+    ; @note:       The stack pointer is set to 0x200000, which is the top of the
+    ;              kernel stack. The kernel stack grows downward from this
+    ;              address. The kernel stack is separate from the boot stack,
+    ;              which is used by the boot-loader and the assembly code.
 
+    call KMain                  ; Call the KMain function (in C file)
+    ; @note:       The KMain function is the main function of the kernel, which
+    ;              is written in C. The KMain function performs the main tasks
+    ;              of the kernel, such as initializing the memory manager, the
+    ;              scheduler, the drivers, and the system calls.
+
+    sti                         ; Enable interrupts
+    ; @note:       The sti instruction sets the interrupt flag in the RFLAGS
+    ;              register, which enables the processor to handle hardware and
+    ;              software interrupts. Interrupts are disabled by default in
+    ;              long mode, which is the 64-bit operating mode of the
+    ;              processor.
+
+; @label:     End
+; @brief:     Halts the CPU and creates an infinite loop.
+;
+; @return:    None. This label does not return any value.
+;
 End:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp End                     ; Jump to 'End' label in infinite loop

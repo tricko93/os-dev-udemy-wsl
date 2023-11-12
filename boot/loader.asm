@@ -1,7 +1,7 @@
 ;------------------------------------------------------------------------------
 ; @file:        loader.asm
 ; @author:      Marko Trickovic (contact@markotrickovic.com)
-; @date:        10/29/2023 09:40 PM
+; @date:        11/12/2023 10:34 PM
 ; @license:     MIT
 ; @language:    Assembly
 ; @platform:    x86_64
@@ -37,125 +37,121 @@
 ;                       - GetMemDone function writes a string to the console
 ;                         indicating the completion of memory map retrieval.
 ;
-;                   4. Implement TestA20 function. This function is testing if
-;                      the A20 line is enabled. The A20 line is a hardware line
-;                      that controls whether addresses above 1MB are wrapped
-;                      around to zero or not. This function writes different
-;                      values to two addresses that differ only in the 21st
-;                      bit and checks if they are seen as different or the
-;                      same. If they are seen as different, then A20 line is
-;                      enabled. If they are seen as the same, then A20 line is
-;                      disabled.
+;                   4. Implement TestA20 routine. This routine is testing if the
+;                      A20 line is enabled by:
 ;
-;                    5. Code to enter protected mode from real mode.
+;                       - Writing different values to two addresses that differ
+;                         only in the 21st bit.
 ;
-;                        - It defines the Global Descriptor Table (GDT) and the
-;                          Interrupt Descriptor Table (IDT) for protected mode.
+;                       - Checking if they are seen as different or the same.
 ;
-;                        - It switches to protected mode by setting the PE bit
-;                          in CR0 register and performs a far jump to a 32-bit
-;                          code segment.
+;                       - If they are different, then A20 line is enabled.
 ;
-;                        - It prints a message on the display using the video
-;                          memory at segment 0xb800.
+;                       - If they are the same, then A20 line is disabled.
 ;
-;                    6. Code to enable paging and enter long mode from
-;                       protected mode.
+;                   5. Code to enter protected mode from real mode.
 ;
-;                        - Prepare the machine for paging by setting up the
-;                          page directory and page table entries.
+;                       - It defines the Global Descriptor Table (GDT) and the
+;                         Interrupt Descriptor Table (IDT) for protected mode.
 ;
-;                        - Load the global descriptor table (GDT) by using the
-;                          lgdt instruction.
+;                       - It switches to protected mode by setting the PE bit in
+;                         CR0 register and performs a far jump to a 32-bit code
+;                         segment.
 ;
-;                        - Enable paging by setting the paging bit in the
-;                          control register 0 (cr0).
+;                       - It prints a message on the display using the video
+;                         memory at segment 0xb800.
 ;
-;                        - Switch to long mode by setting the long mode bit in
-;                          the extended feature enable register (EFER) and
-;                          jumping to a 64-bit code segment.
+;                   6. Code to enable paging and enter long mode from protected
+;                      mode.
 ;
-;                    7. Code to relocate the Kernel from 0x10000 to 0x200000
-;                       memory address.
+;                       - Prepare the machine for paging by setting up the page
+;                         directory and page table entries.
 ;
-;                        - Relocates the Kernel from 0x10000 to 0x200000.
+;                       - Load the global descriptor table (GDT) by using the
+;                         lgdt instruction.
 ;
-;                        - Jumps to the kernel entry point at 0x200000.
+;                       - Enable paging by setting the paging bit in the control
+;                         register 0 (cr0).
 ;
-;                        - Halts the processor in an infinite loop.
+;                       - Switch to long mode by setting the long mode bit in
+;                         the extended feature enable register (EFER) and
+;                         jumping to a 64-bit code segment.
+;
+;                   7. Code to relocate the Kernel from 0x10000 to 0x200000
+;                      memory address.
+;
+;                       - Relocates the Kernel from 0x10000 to 0x200000.
+;
+;                       - Jumps to the kernel entry point at 0x200000.
+;
+;                       - Halts the processor in an infinite loop.
 ;
 ; Usage: make
 ;
 ; Revision History:
 ;
-; Revision 0.1: 10/24/2023 Marko Trickovic
-; Initial creation of the loader assembly program.
-; Added functionality to print a success message on the console.
-; Implemented an infinite loop at the end of the program to keep the system
-; in a stable state after the loading process is complete.
+;   - Revision 0.1: 10/24/2023 Marko Trickovic
+;     Initial creation of the loader assembly program.
+;     Added functionality to print a success message on the console.
+;     Implemented an infinite loop at the end of the program to keep the system
+;     in a stable state after the loading process is complete.
 ;
-; Revision 0.2: 10/25/2023  Marko Trickovic
-; Added checks for Long Mode and 1G Page support in the CPUID instruction.
-; The code now stores the drive ID in memory.
-; The CPUID instruction is executed with EAX=0x80000000 to return the highest
-; function number and vendor string.
-; The value in EAX is compared with 0x80000001 to check if it's less. If it
-; is, the code jumps to NotSupport.
-; The CPUID instruction is executed again with EAX=0x80000001 to return
-; processor info and feature bits.
-; Bit 29 (Long Mode support) in EDX is tested. If it's not set, the code
-; jumps to NotSupport.
-; Bit 26 (1G Page support) in EDX is tested. If it's not set, the code jumps
-; to NotSupport.
+;   - Revision 0.2: 10/25/2023 Marko Trickovic
+;     Added checks for Long Mode and 1G Page support in the CPUID instruction.
+;     The code now stores the drive ID in memory.
+;     The CPUID instruction is executed with EAX=0x80000000 to return the
+;     highest function number and vendor string.
+;     The value in EAX is compared with 0x80000001 to check if it's less. If it
+;     is, the code jumps to NotSupport.
+;     The CPUID instruction is executed again with EAX=0x80000001 to return
+;     processor info and feature bits.
+;     Bit 29 (Long Mode support) in EDX is tested. If it's not set, the code
+;     jumps to NotSupport.
+;     Bit 26 (1G Page support) in EDX is tested. If it's not set, the code jumps
+;     to NotSupport.
 ;
-; Revision 03: 10/26/2023  Marko Trickovic
-; Initial version with LoadKernel function implementation.
+;   - Revision 03: 10/26/2023  Marko Trickovic
+;     Initial version with LoadKernel function implementation.
 ;
-; Revision 0.4: 10/27/2023  Marko Trickovic
-; Added functions for getting system memory map (GetMemInfoStart, GetMemInfo,
-; and GetMemDone).
+;   - Revision 0.4: 10/27/2023  Marko Trickovic
+;     Added functions for getting system memory map (GetMemInfoStart,
+;     GetMemInfo, and GetMemDone).
 ;
-; Revision 0.5: 10/29/2023  Marko Trickovic
-; Added functions for testing if the A20 line is enabled (TestA20,
-; SetA20LineDone).
+;   - Revision 0.5: 10/29/2023  Marko Trickovic
+;     Added functions for testing if the A20 line is enabled (TestA20,
+;     SetA20LineDone).
 ;
-; Revision 0.6: 10/29/2023  Marko Trickovic
-; Added SetVideoMode and PrintMessage function implementations.
+;   - Revision 0.6: 10/29/2023  Marko Trickovic
+;     Added SetVideoMode and PrintMessage function implementations.
 ;
-; Revision 0.7: 10/29/2023  Marko Trickovic
-; Added code to enter protected mode from real mode.
+;   - Revision 0.7: 10/29/2023  Marko Trickovic
+;     Added code to enter protected mode from real mode.
 ;
-; Revision 0.8: 10/29/2023  Marko Trickovic
-; Added code to enable paging and enter long mode from protected mode.
+;   - Revision 0.8: 10/29/2023  Marko Trickovic
+;     Added code to enable paging and enter long mode from protected mode.
 ;
-; Revision 0.9  10/30/2023  Marko Trickovic
-; Code to relocate the Kernel from 0x10000 to 0x200000 memory address.
+;   - Revision 0.9  10/30/2023  Marko Trickovic
+;     Code to relocate the Kernel from 0x10000 to 0x200000 memory address.
+;
+;   - Revision 1.0: 11/12/2023 Marko Trickovic
+;     Refactored the comments to improve readability.
 ;------------------------------------------------------------------------------
 
 [BITS 16]           ; Use 16-bit mode
 [ORG 0x7e00]        ; Set origin to loader program address
 
-; This code is used to check if the CPU supports long mode and 1G page support.
-; Long mode is a feature of the x86-64 architecture that allows 64-bit code to
-; be executed natively on the CPU. 1G page support is a feature that allows the
-; use of larger page sizes, which can improve performance in certain situations.
+; @routine:         start
+; @brief:           Checks if the processor supports long mode and 1G page.
 ;
-; The code starts by storing the drive ID in memory using mov [DriveId],dl.
-; It then executes the CPUID instruction with EAX set to 0x80000000 to
-; determine if the CPU supports extended features. If EAX is less than
-; 0x80000001, it means that the CPU does not support extended features,
-; and the code jumps to NotSupport.
+; @param:     dl    A register that holds the drive ID from which the program
+;                   was loaded.
+; @param:     eax   A register that holds the function number for the CPUID
+;                   instruction.
 ;
-; If the CPU does support extended features, the code executes the CPUID
-; instruction again with EAX set to 0x80000001. It then tests bit 29
-; (Long Mode support) and bit 26 (1G Page support) of the EDX register
-; using the test instruction. If either of these bits is not set, it means that
-; the CPU does not support long mode or 1G page support, and the code jumps to
-; NotSupport.
+; @return:          None. If the processor supports long mode and 1G page, the
+;                   routine continues to the next step. If not, the routine
+;                   jumps to NotSupport label.
 ;
-; The purpose of this code is to check if the CPU supports long mode and 1G
-; page support before attempting to use these features. This can help avoid
-; errors or crashes when running code that requires these features.
 start:
     mov [DriveId],dl    ; Store the drive ID in memory
     mov eax,0x80000000  ; Load the value 0x80000000 into the EAX register
@@ -170,24 +166,19 @@ start:
     test edx,(1<<26)    ; Test if bit 26 (1G Page support) in EDX is set
     jz NotSupport       ; If bit 26 is not set, jump to NotSupport
 
-; Function: LoadKernel
+; @routine:   LoadKernel
+; @brief:     Loads a kernel from a disk into memory.
 ;
-; The purpose of this code is to load the kernel from the hard disk partition.
-; The function LoadKernel uses BIOS interrupt 0x13 and function 0x42 to read
-; data from the hard disk. The ReadPacket structure is used to specify the
-; location and size of the data to be read. Specifically, the size of the
-; ReadPacket structure is set to 16 bytes, and the number of sectors to read
-; is set to 100. The memory address where the data will be read is set to 0,
-; and the segment offset is set to 0x1000.
+; @param:     si    A pointer to the ReadPacket structure that contains the
+;                   parameters for the disk read operation.
+; @param:     dl    The drive number from which to read the kernel.
+; @param:     ah    The function number for the Extended Disk Read BIOS
+;                   interrupt (0x42).
 ;
-; The kernel is written starting from the 6th sector, which is specified by
-; setting dword[si+8] to 6. The high address for reading from the hard disk
-; partition is set to 0, and the drive number from which to read is set
-; using dl. Finally, BIOS interrupt 0x13 is called using int 0x13, and if
-; there is an error, the code jumps to ReadError.
+; @return:    None. If the disk read operation is successful, the kernel is
+;             loaded into memory at segment 0x1000. If there is an error, the
+;             routine jumps to ReadError label.
 ;
-; This function loads the kernel from the hard disk partition using BIOS
-; interrupt 0x13 and function 0x42.
 LoadKernel:
     mov si,ReadPacket       ; Set SI to the address of ReadPacket
     mov word[si],0x10       ; Set the size of the ReadPacket structure to 16B
@@ -201,26 +192,26 @@ LoadKernel:
     int 0x13                ; Call BIOS interrupt 0x13
     jc ReadError            ; Jump if error
 
-; Function: GetMemInfoStart
+; @routine:   GetMemInfoStart
+; @brief:     Gets the initial memory map entry from the BIOS.
 ;
-; This code is using BIOS interrupt 0x15 to read memory information about
-; the PC system it's run on. Specifically, it uses the 0xe820 function to
-; get the system memory map. The EDX register is set to the signature SMAP,
-; and ECX is set to 20, which is the size of the memory range descriptor.
-; The buffer to store memory range descriptors is set to 0x9000. The
-; enumeration starts with EBX being set to zero. The code then call BIOS
-; interrupt 0x15 and jumpts to NotSupport if there is an error.
+; @param:     eax   The function number for the Getting System Memory Map BIOS
+;                   interrupt (0xe820).
+; @param:     edx   The signature value to indicate the presence of the memory
+;                   map function ('SMAP').
+; @param:     ecx   The size of the memory range descriptor structure (20
+;                   bytes).
+; @param:     edi   A pointer to the buffer where to store the memory range
+;                   descriptor.
+; @param:     ebx   The continuation value to indicate the start or end of the
+;                   enumeration (0 for start, nonzero for end).
 ;
-; If there are no errors, the code checks if all memory range descriptors have
-; been obtained. If not, it gets the next descriptor by incrementing the buffer
-; pointer by 20 bytes and calling BIOS interrupt 0x15 again.
+; @return:    None. If the memory map function is supported and successful, the
+;             memory range descriptor is stored in the buffer pointed by edi,
+;             and the continuation value is stored in ebx. If there is an error
+;             or the function is not supported, the routine jumps to NotSupport
+;             label.
 ;
-; When all descriptors have been obtained, the code jumps to GetMemDone.
-; This function writes a string with color to the screen using BIOS interrupt
-; 0x10. The string is stored at Message, and its length is stored in MessageLen.
-; The color of the string is light green on black.
-;
-; This code is used to get information about the memory layout of a PC system.
 GetMemInfoStart:
     mov eax,0xe820          ; Function for Getting System Memory Map
     mov edx,0x534d4150      ; This is 'SMAP' signature
@@ -233,7 +224,24 @@ GetMemInfoStart:
     test ebx,ebx            ; All memory range descriptors have been obtained
     jnz GetMemInfo          ; Get next descriptor
 
-; Function: GetMemInfo
+; @routine:   GetMemInfo
+; @brief:     Gets the next memory map entry from the BIOS.
+;
+; @param:     edi   A pointer to the buffer where to store the memory range
+;                   descriptor.
+; @param:     eax   The function number for the Getting System Memory Map BIOS
+;                   interrupt (0xe820).
+; @param:     edx   The signature value to indicate the presence of the memory
+;                   map function ('SMAP').
+; @param:     ecx   The size of the memory range descriptor structure (20
+;                   bytes).
+;
+; @return:    None. If the memory map function is supported and successful, the
+;             memory range descriptor is stored in the buffer pointed by edi,
+;             and the continuation value is stored in ebx. If there is an error
+;             or the end of the enumeration is reached, the routine jumps to
+;             GetMemDone label.
+;
 GetMemInfo:
     add edi,20              ; Point to next descriptor in buffer
     mov eax,0xe820          ; Function for Getting System Memory Map
@@ -242,27 +250,27 @@ GetMemInfo:
     int 0x15                ; Call BIOS interrupt 0x15
     jc GetMemDone           ; Jump if error
 
-; Function: GetMemDone:
+; @label:     GetMemDone
+; @brief:     Get the memory map finished.
+;
+; @return:    None.
+;
 GetMemDone:
 
-; Function: TestA20
+; @routine:   TestA20
+; @brief:     Tests if the A20 line is enabled or disabled.
 ;
-; This function checks if A20 line is enabled by default. It does so by writing
-; some value (in this case) 0xA200 in 0000:7c00, and tries to read from the
-; location FFFF:7c10. If the A20 line is disabled, this will wrap around and
-; read from location 0x7c00 instead. If the values at 0000:7c00 and FFFF:7c10
-; are not equal, it means that the A20 line is enabled. This is because when
-; the A20 line is enabled, addresses above 1MB can be accessed directly without
-; wrapping around to lower memory locations. So, if the values are not equal,
-; it indicates that the write to 0000:7c00 did not affect the value at
-; FFFF:7c10, which means the A20 line is enabled. If they are equal, it means
-; that the write to 0000:7c00 did affect the value at FFFF:7c10 due to address
-; line wrapping, which means the A20 line is disabled.
+; @param:     ax    A register that holds the maximum value (0xffff) to set the
+;                   segment register ES.
+; @param:     es    A segment register that points to the top of the memory
+;                   (0xffff0000).
+; @param:     ds    A segment register that points to the base of the memory
+;                   (0x00000000).
 ;
-; Checking for the A20 line is important because it controls how memory
-; addresses are interpreted. By checking if the A20 line is enabled or
-; disabled, this code can ensure that memory above 1MB can be accessed
-; directly without any issues.
+; @return:    None. If the A20 line is enabled, the routine jumps to
+;             SetA20LineDone label. If the A20 line is disabled, the routine
+;             jumps to End label.
+;
 TestA20:
     mov ax,0xffff               ; Set maximum value in AX
     mov es,ax                   ; Set ES to point to the top of memory
@@ -273,15 +281,29 @@ TestA20:
     cmp word[es:0x7c10],0xb200  ; Compare memory location 0x7c10 with 0xb200
     je End                      ; If the values are equal, jump to End
 
-; Function: SetA20LineDone
+; @routine:   SetA20LineDone
+; @brief:     Resets the segment registers after testing the A20 line.
+;
+; @param:     ax    A register that holds the value 0 to clear the segment
+;                   register ES.
+; @param:     es    A segment register that is set to 0 to point to the base of
+;                   the memory.
+;
+; @return:    None. This routine does not return any value.
+;
 SetA20LineDone:
     xor ax,ax                    ; Zero out AX
     mov es,ax                    ; Set extra segment to 0
 
-; Function: SetVideoMode
+; @routine:   SetVideoMode
+; @brief:     Sets the video mode to 80x25 text and switches to protected mode.
 ;
-; This function sets the video mode to 80x25 text mode using the BIOS interrupt
-; 0x10 service 0x00.
+; @param:     ax    A register that holds the video mode number (3) to pass to
+;                   the BIOS interrupt 0x10.
+;
+; @return:    None. This routine does not return any value. It performs a far
+;             jump to the PMEntry label in the code segment 8.
+;
 SetVideoMode:
     mov ax,3                    ; Video mode number in AX (3 = 80x25 text)
     int 0x10                    ; BIOS interrupt 0x10 to set video mode
@@ -296,14 +318,54 @@ SetVideoMode:
 
     jmp 8:PMEntry               ; Far jump to code segment 8 and offset PMEntry
 
+
+; @routine:   ReadError
+; @brief:     Handles the error case when the disk read operation fails.
+;
+; @return:    None. This label does not return any value.
+;
 ReadError:
+
+; @label:     NotSupport
+; @brief:     Handles the error case when the processor does not support long
+;             mode or 1G page.
+;
+; @return:    None. This label does not return any value.
+;
 NotSupport:
+
+; @label:     End
+; @brief:     Halts the CPU and creates an infinite loop.
+;
+; @return:    None. This label does not return any value.
+;
 End:
     hlt                         ; Halt the CPU, waiting for the next interrupt
     jmp End                     ; Jump back to 'End', creating an infinite loop
 
 [BITS 32]                       ; Use 32-bit mode
+
+; @routine:   PMEntry
+; @param:     ax    A register that holds the data segment selector (0x10) to
+;                   set the segment registers.
+; @param:     ds    A segment register that points to the data segment.
+; @param:     es    A segment register that points to the extra segment.
+; @param:     ss    A segment register that points to the extra segment.
+; @param:     esp   A register that holds the stack pointer address (0x7c00).
+; @param:     edi   A register that holds the page directory base address
+;                   (0x70000).
+; @param:     eax   A register that holds the value to set the control
+;                   registers.
+; @param:     ecx   A register that holds the size of the memory range
+;                   descriptor structure (20 bytes).
+;
+; @return:    None. This label sets up the segment registers, clears the page
+;             directory, loads the GDT and IDT, enables PAE, sets the PDBR,
+;             enables long mode, enables paging, and switches to long mode by
+;             jumping to LMEntry label.
+;
 PMEntry:                        ; Entry point for protected mode
+
     mov ax,0x10                 ; Move data segment selector (0x10) to AX
     mov ds,ax                   ; Move data segment selector from AX to DS
     mov es,ax                   ; Move data segment selector from AX to ES
@@ -339,11 +401,31 @@ PMEntry:                        ; Entry point for protected mode
 
     jmp 8:LMEntry               ; Switch to long mode
 
+; @label:     PEnd
+; @brief:     Halts the CPU and creates an infinite loop in protected mode.
+;
+; @return:    None. This label does not return any value.
+;
 PEnd:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp PEnd                    ; Jump to 'PEnd' label in infinite loop
 
 [BITS 64]                       ; Use 64-bit mode
+
+; @label:     LMEntry
+; @brief:     Entry point for long mode.
+;
+; @param:     rsp   A register that holds the stack pointer address (0x7c00).
+; @param:     rdi   A register that holds the new destination address for the
+;                   kernel (0x200000).
+; @param:     rsi   A register that holds the old destination address for the
+;                   kernel (0x10000).
+; @param:     rcx   A register that holds the number of quadwords to move
+;                   (51200/8).
+;
+; @return:    None. This label sets the stack pointer, relocates the kernel to a
+;             higher memory address, and jumps to the kernel entry point.
+;
 LMEntry:                        ; Entry point for long mode
     mov rsp,0x7c00              ; Stack pointer
 
@@ -355,13 +437,32 @@ LMEntry:                        ; Entry point for long mode
 
     jmp 0x200000                ; Jump to kernel
 
+; @brief:     Halts the CPU and creates an infinite loop in long mode.
+;
+; @return:    None. This label does not return any value.
+;
 LEnd:
     hlt                         ; Halt CPU until external interrupt jmp
     jmp LEnd                    ; Jump to 'LEnd' label in infinite loop
-
+;
+; @var:       DriveId
+;
+; @brief:     A byte variable that stores the drive ID from which the program
+;             was loaded.
 DriveId:    db 0            ; Byte for DriveId
+
+; @var:       ReadPacket
+;
+; @brief:     A 16-byte structure that contains the parameters for the disk
+;             read operation in extended mode.
+;
 ReadPacket: times 16 db 0   ; Allocate 16B, for storing a packet from the disk
 
+; @var:       Gdt32
+;
+; @brief:     A 32-bit GDT descriptor that contains the code and data segment
+;             descriptors for protected mode.
+;
 Gdt32:                      ; 32-bit GDT descriptor, zero-initialized
     dq 0
 Code32:                     ; 32-bit code segment descriptor
@@ -379,19 +480,47 @@ Data32:                     ; 32-bit data segment descriptor
     db 0xcf                 ; flags=0xcf
     db 0                    ; upper 8 bits of base address
 
+; @var:       Gdt32Len
+;
+; @brief:     A constant that holds the length of the Gdt32 descriptor.
+;
 Gdt32Len: equ $-Gdt32       ; Length of Gdt32
 
-Gdt32Ptr: dw Gdt32Len-1     ; (Length of Gdt32) - 1
+; @var:       Gdt32Ptr
+;
+; @brief:     A 6-byte structure that contains the length and address of the
+;             Gdt32 descriptor.
+;
+Gdt32Ptr: dw Gdt32Len-1     ; (Length of Gdt32)-1
           dd Gdt32          ; Address of Gdt32
 
+; @var:       Idt32Ptr
+;
+; @brief:     A 6-byte structure that contains the length and address of the
+;             Idt32 descriptor.
+;
 Idt32Ptr: dw 0              ; Length of Idt32
           dd 0              ; Address of Idt32
 
+; @var:       Gdt64
+;
+; @brief:     A 64-bit GDT descriptor that contains the code segment
+;             descriptor for long mode.
+;
 Gdt64:                      ; 64-bit GDT descriptor, zero-initialized
     dq 0
     dq 0x0020980000000000   ; Code segment descriptor
 
+; @var:       Gdt64Len
+;
+; @brief:     A constant that holds the length of the Gdt64 descriptor.
+;
 Gdt64Len: equ $-Gdt64       ; Length of Gdt64
 
+; @var:       Gdt64Ptr
+;
+; @brief:     A 10-byte structure that contains the length and address of the
+;             Gdt64 descriptor.
+;
 Gdt64Ptr: dw Gdt64Len-1     ; (Length of Gdt64)-1
           dd Gdt64          ; Address of Gdt64

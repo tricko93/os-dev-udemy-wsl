@@ -1,7 +1,7 @@
 /* -----------------------------------------------------------------------------
  * @file:        trap.h
  * @author:      Marko Trickovic (contact@markotrickovic.com)
- * @date:        11/06/2023 11:45 PM
+ * @date:        11/12/2023 10:34 PM
  * @license:     MIT
  * @description: This header file contains the declarations of the data
  *               structures and functions related to trap handling in the x86_64
@@ -66,6 +66,9 @@
  *     Initial version that declares data structures and functions for trap
  *     handling.
  *
+ *   - Revision 0.2: 11/12/2023 Marko Trickovic
+ *     Refactored the comments to improve readability.
+ *
  * Part of the os-dev-udemy-wsl.
  */
 
@@ -74,28 +77,91 @@
 
 #include "stdint.h"
 
-// struct IdtEntry - The structure of an interrupt descriptor table entry
+/**
+ * @brief:                The structure of an interrupt descriptor table entry.
+ *
+ * @struct:               IdtEntry
+ *
+ * @param[in]: low       The lower 16 bits of the handler address
+ * @param[in]: selector  The code segment selector
+ * @param[in]: res0      Reserved, set to zero
+ * @param[in]: attr      The type and attributes of the entry
+ * @param[in]: mid       The middle 16 bits of the handler address
+ * @param[in]: high      The higher 32 bits of the handler address
+ * @param[in]: res1      Reserved, set to zero
+ */
 struct IdtEntry {
-    uint16_t low;           // The lower 16 bits of the handler address
-    uint16_t selector;      // The code segment selector
-    uint8_t res0;           // Reserved, set to zero
-    uint8_t attr;           // The type and attributes of the entry
-    uint16_t mid;           // The middle 16 bits of the handler address
-    uint32_t high;          // The higher 32 bits of the handler address
-    uint32_t res1;          // Reserved, set to zero
+    uint16_t low;
+    uint16_t selector;
+    uint8_t res0;
+    uint8_t attr;
+    uint16_t mid;
+    uint32_t high;
+    uint32_t res1;
 };
 
-// struct IdtPtr - The structure of an interrupt descriptor table pointer
-struct IdtPtr {
-    uint16_t limit;         // The size of the IDT in bytes
-    uint64_t addr;          // The base address of the IDT
-} __attribute__((packed));  // The attribute to prevent padding
 
 /**
- * struct TrapFrame - The structure of a trap frame
- * A trap frame is a data structure that stores the state of the CPU registers
- * when a trap (an exception or an interrupt) occurs.
-*/
+ * @brief:             The structure of an interrupt descriptor table pointer.
+ *
+ * @struct:            IdtPtr
+ *
+ * @param[in]: limit  The size of the IDT in bytes
+ * @param[in]: addr   The base address of the IDT
+ *
+ * @return:            None
+ *
+ * @description:       This struct holds the base address and the size of the
+ *                     IDT, which is a data structure that maps each interrupt
+ *                     vector to an interrupt handler function. The struct has
+ *                     an attribute to prevent padding, which means that the
+ *                     compiler will not add any extra bytes between the fields
+ *                     of the struct. This is necessary to ensure that the CPU
+ *                     can access the IDT correctly.
+ */
+struct IdtPtr {
+    uint16_t limit;
+    uint64_t addr;
+} __attribute__((packed));
+
+/**
+ * @brief:                 The structure of a trap frame.
+ *
+ * @struct:                TrapFrame
+ *
+ * @description:           This struct contains the registers and flags that are
+ *                         saved and restored during a trap, which is an
+ *                         exception or an interrupt that occurs during the
+ *                         execution of a program. The struct is pushed onto the
+ *                         stack by the CPU when a trap occurs, and popped from
+ *                         the stack by the handler function when the trap is
+ *                         handled. The struct allows the handler function to
+ *                         access and modify the state of the program before and
+ *                         after the trap.
+ *
+ * @param:     r15         General purpose register 15
+ * @param:     r14         General purpose register 14
+ * @param:     r13         General purpose register 13
+ * @param:     r12         General purpose register 12
+ * @param:     r11         General purpose register 11
+ * @param:     r10         General purpose register 10
+ * @param:     r9          General purpose register 9
+ * @param:     r8          General purpose register 8
+ * @param:     rbp         Base pointer register
+ * @param:     rdi         Destination index register
+ * @param:     rsi         Source index register
+ * @param:     rdx         Data register
+ * @param:     rcx         Counter register
+ * @param:     rbx         Base register
+ * @param:     rax         Accumulator register
+ * @param:     trapno      Trap number
+ * @param:     errorcode   Error code
+ * @param:     rip         Instruction pointer register
+ * @param:     cs          Code segment register
+ * @param:     rflags      Flags register
+ * @param:     rsp         Stack pointer register
+ * @param:     ss          Stack segment
+ */
 struct TrapFrame {
     int64_t r15;
     int64_t r14;
@@ -122,35 +188,162 @@ struct TrapFrame {
 };
 
 /**
- * The declarations of the functions related to trap handling.
- * Each function corresponds to an interrupt vector that handles a specific
- * trap. A trap is an exception or an interrupt that occurs during the
- * execution of the program.
- * The functions are defined in trap.asm and trap.c.
-*/
-void vector0(void);         // Handles divide by zero exception
-void vector1(void);         // Handles debug exception
-void vector2(void);         // Handles non-maskable interrupt
-void vector3(void);         // Handles breakpoint exception
-void vector4(void);         // Handles overflow exception
-void vector5(void);         // Handles bound range exceeded exception
-void vector6(void);         // Handles invalid opcode exception
-void vector7(void);         // Handles device not available exception
-void vector8(void);         // Handles double fault exception
-void vector10(void);        // Handles invalid TSS exception
-void vector11(void);        // Handles segment not present exception
-void vector12(void);        // Handles stack-segment fault exception
-void vector13(void);        // Handles general protection fault exception
-void vector14(void);        // Handles page fault exception
-void vector16(void);        // Handles x87 floating-point exception
-void vector17(void);        // Handles alignment check exception
-void vector18(void);        // Handles machine check exception
-void vector19(void);        // Handles SIMD floating-point exception
-void vector32(void);        // Handles timer interrupt
-void vector39(void);        // Handles keyboard interrupt
-void init_idt(void);        // Initializes the interrupt descriptor table
-void eoi(void);             // Sends end of interrupt signal
-void load_idt(struct IdtPtr *ptr);  // Loads the interrupt descriptor table ptr
-unsigned char read_isr(void);       // Reads the interrupt service register
+ * @defgroup:  vector Vector functions
+ * @name:      vector
+ * @brief:     This group contains the functions that handle various exceptions
+ *             and interrupts. @{
+ */
+/**
+ * @fn:        vector0(void)
+ *
+ * @brief:     Handles divide by zero exception.
+ */
+void vector0(void);
+/**
+ * @fn:        vector1(void)
+ *
+ * @brief:     Handles debug exception.
+ */
+void vector1(void);
+/**
+ * @fn:        vector2(void)
+ *
+ * @brief:     Handles non-maskable interrupt.
+ */
+void vector2(void);
+/**
+ * @fn:        vector3(void)
+ *
+ * @brief:     Handles breakpoint exception.
+ */
+void vector3(void);
+/**
+ * @fn:        vector4(void)
+ *
+ * @brief:     Handles overflow exception.
+ */
+void vector4(void);
+/**
+ * @fn:        vector5(void)
+ *
+ * @brief:     Handles bound range exceeded exception.
+ */
+void vector5(void);
+/**
+ * @fn:        vector6(void)
+ *
+ * @brief:     Handles invalid opcode exception.
+ */
+void vector6(void);
+/**
+ * @fn:        vector7(void)
+ *
+ * @brief:     Handles device not available exception.
+ */
+void vector7(void);
+/**
+ * @fn:        vector8(void)
+ *
+ * @brief:     Handles double fault exception.
+ */
+void vector8(void);
+/**
+ * @fn:        vector10(void)
+ *
+ * @brief:     Handles invalid TSS exception.
+ */
+void vector10(void);
+/**
+ * @fn:        vector11(void)
+ *
+ * @brief:     Handles segment not present exception.
+ */
+void vector11(void);
+/**
+ * @fn:        vector12(void)
+ *
+ * @brief:     Handles stack-segment fault exception.
+ */
+void vector12(void);
+/**
+ * @fn:        vector13(void)
+ *
+ * @brief:     Handles general protection fault exception.
+ */
+void vector13(void);
+/**
+ * @fn:        vector14(void)
+ *
+ * @brief:     Handles page fault exception.
+ */
+void vector14(void);
+/**
+ * @fn:        vector16(void)
+ *
+ * @brief:     Handles x87 floating-point exception.
+ */
+void vector16(void);
+/**
+ * @fn:        vector17(void)
+ *
+ * @brief:     Handles alignment check exception.
+ */
+void vector17(void);
+/**
+ * @fn:        vector18(void)
+ *
+ * @brief:     Handles machine check exception.
+ */
+void vector18(void);
+/**
+ * @fn:        vector19(void)
+ *
+ * @brief:     Handles SIMD floating-point exception.
+ */
+void vector19(void);
+/**
+ * @fn:        vector32(void)
+ *
+ * @brief:     Handles timer interrupt.
+ */
+void vector32(void);
+/**
+ * @fn:        vector39(void)
+ *
+ * @brief:     Handles keyboard interrupt.
+ */
+void vector39(void);
+/**
+ * @fn:        init_idt(void)
+ *
+ * @brief:     Initializes the interrupt descriptor table.
+ */
+void init_idt(void);
+/**
+ * @fn:        eoi(void)
+ *
+ * @brief:     Sends end of interrupt signal.
+ */
+void eoi(void);
+/**
+ * @fn:        load_idt(void)
+ *
+ * @brief:     Loads the interrupt descriptor table pointer.
+ *
+ * @param:     ptr   The pointer
+ */
+void load_idt(struct IdtPtr *ptr);
+/**
+ * @fn:        read_isr(void)
+ *
+ * @brief:     Reads the interrupt service register.
+ *
+ * @return:    Returns an 8 bits value indicating the state of different
+ *             interrupt sources.
+ */
+unsigned char read_isr(void);
+/**
+ * @}
+ */
 
 #endif

@@ -1,7 +1,7 @@
 /******************************************************************************
  * @file         trap.c
  * @author       Marko Trickovic (contact@markotrickovic.com)
- * @date         11/06/2023 11:45 PM
+ * @date         11/12/2023 10:34 PM
  * @license      MIT
  * @description: This file contains the definitions and functions for setting up
  *               the interrupt descriptor table (IDT) in the x86_64
@@ -18,7 +18,7 @@
  *               The IDT is accessed by the CPU through a 10-byte struct called
  *               IdtPtr, which contains the base address and the size of the
  *               IDT.
- *
+ * 
  *               The file defines an external variable named handler, which is a
  *               pointer to a function that takes an int parameter and returns
  *               void. This function is used as the default interrupt handler
@@ -57,7 +57,7 @@
  *               The handler function takes a pointer to the TrapFrame as a
  *               parameter, and checks the trap number to perform different
  *               actions accordingly.
- *
+ * 
  *               For the timer interrupt (trap number 32), the handler function
  *               sends end of interrupt (EOI) signal to the interrupt
  *               controller, which is a device that manages the interrupts and
@@ -75,9 +75,14 @@
  *               is a simple way of handling exceptions that are not expected or
  *               handled by the program.
  *
- * Revision 0.1: 11/06/2023 Marko Trickovic
- * Initial version that declares data structures and functions for trap
- * handling.
+ * Revision History:
+ *
+ *   - Revision 0.1: 11/06/2023 Marko Trickovic
+ *     Initial version that declares data structures and functions for trap
+ *     handling.
+ *
+ *   - Revision 0.2: 11/12/2023 Marko Trickovic
+ *     Refactored the comments to improve readability.
  *
  * Part of the os-dev-udemy-wsl.
  *****************************************************************************/
@@ -85,23 +90,37 @@
 #include "trap.h"
 
 /**
- * Define static global idt_pointer variable and static global IdtEntry array.
- * 
- * static - the definitions are only visible in this file.
+ * @brief:       A pointer to the interrupt descriptor table (IDT).
+ *
+ * @type:        struct IdtPtr
+ * @size:        6 bytes
+ * @description: This variable holds the base address and the size of the IDT,
+ *               which is a data structure that maps each interrupt vector to an
+ *               interrupt handler function.
  */
 static struct IdtPtr idt_pointer;
+
+/**
+ * @brief:       An array of interrupt descriptor table entries.
+ *
+ * @type:        struct IdtEntry
+ * @size:        256 * 16 bytes
+ * @description: This variable contains 256 elements, each of which is a struct
+ *               that represents an IDT entry. An IDT entry contains the address
+ *               and attributes of an interrupt handler function, which is
+ *               executed when the corresponding interrupt occurs.
+ */
 static struct IdtEntry vectors[256];
 
 /**
- * init_idt_entry - a static function that initializes an interrupt descriptor
- * table entry
+ * @brief:     Initializes the idt entry.
+ *
+ * @param:     entry      a pointer to the entry to be initialized
+ * @param[in]: addr       the address of the interrupt handler function
+ * @param[in]: attribute  the type and attributes of the entry
  * 
- * @param IdtEntry entry: a pointer to the entry to be initialized
- * @param uint64_t addr: the address of the interrupt handler function
- * @param uint8_t attribute: the type and attributes of the entry
- * 
- * @return void
-*/
+ * @return:    None
+ */
 static void init_idt_entry(struct IdtEntry *entry, uint64_t addr, uint8_t attribute)
 {
     entry->low = (uint16_t)addr;
@@ -112,17 +131,22 @@ static void init_idt_entry(struct IdtEntry *entry, uint64_t addr, uint8_t attrib
 }
 
 /**
- * init_idt - a function that initializes the interrupt descriptor table
+ * @brief:          A function that initializes the interrupt descriptor table
+ *                  (IDT).
  * 
- * It sets up the entries for each interrupt vector using the init_idt_entry
- * function.
+ * @param:          None
  * 
- * It also sets up the pointer to the interrupt descriptor table using the
- * idt_pointer struct.
+ * @return:         None
  * 
- * It then loads the pointer to the interrupt descriptor table using the
- * load_idt function.
-*/
+ * @description:    This function initializes the IDT by calling the
+ *                  init_idt_entry function for each interrupt vector and
+ *                  setting the corresponding interrupt handler function, type,
+ *                  and attributes.
+ *
+ *                  The function also sets the IDT pointer to point to the base
+ *                  address and the size of the IDT, and loads the IDT into the
+ *                  CPU using the load_idt function.
+ */
 void init_idt(void)
 {
     init_idt_entry(&vectors[0],(uint64_t)vector0,0x8e);
@@ -152,21 +176,24 @@ void init_idt(void)
 }
 
 /**
- * handler - A function that handles traps
- * 
- * This function checks the trap number and performs different actions
- * accordingly.
- * 
- * For timer interrupt (trap number 32), it sends an end of interrupt signal.
- * For keyboard interrupt (trap number 39), it reads the interrupt service
- * register and sends an end of interrupt signal only if the highest bit is
- * set.
- * For other traps, it enters an infinite loop.
- * 
- * @param TrapFrame *tf: a pointer to the trap frame that contains the state
- * of the CPU registers when the trap occurred
- * 
- * @return void
+ * @brief:      A function that handles the traps that occur during the
+ *              execution of the program.
+ *
+ * @param[in]:  struct TrapFrame *tf  a pointer to the trap frame, which
+ *                                    contains the registers and flags that are
+ *                                    saved and restored during a trap.
+ *
+ * @return:      None
+ *
+ * @description: This function handles the traps according to the trap number,
+ *               which is stored in the trap frame.
+ *               The function uses the eoi and read_isr functions to send an
+ *               end-of-interrupt signal and read the in-service register value,
+ *               respectively.
+ *               The function handles two specific cases: when the trap number
+ *               is 32, which means a timer interrupt, and when the trap number
+ *               is 39, which means a spurious interrupt. For other cases, the
+ *               function enters an infinite loop.
  */
 void handler(struct TrapFrame *tf)
 {
